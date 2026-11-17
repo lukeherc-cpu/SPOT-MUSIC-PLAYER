@@ -2,7 +2,7 @@
 
 Android music and podcast player built on Gamut's playback engine, with a new Spotify-style interface and native Kotlin integration of [Aran404/SpotAPI](https://github.com/Aran404/SpotAPI).
 
-[Download Android alpha APKs](https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER/releases) · [Source](https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER)
+[Windows, macOS and Linux desktop app](desktop/README.md) · [Download Android alpha APKs](https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER/releases) · [Source](https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER)
 
 - Home with history-driven Daily Mixes, All / Music / Podcasts filters, saved shortcuts and artwork rails. Mixes refresh after listening changes and every 30 minutes.
 - Dedicated Music, genre, new-release and Charts browse pages. Charts opens real Spotify US/global chart collections. Song menus include Go to album; album identities persist in your library.

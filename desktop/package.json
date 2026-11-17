@@ -1,0 +1,93 @@
+{
+  "name": "spot-music-desktop",
+  "productName": "Spot Music",
+  "version": "0.2.0-alpha.1",
+  "description": "Music discovery and podcast player with Spotify catalog integration",
+  "author": "Spot Music contributors",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "test:ui": "playwright test",
+    "prepare:resolver": "node scripts/resolver.mjs",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.12.1"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0",
+    "@playwright/test": "1.65.1"
+  },
+  "build": {
+    "appId": "com.lukeherc.spotmusic.desktop",
+    "asar": true,
+    "files": [
+      "src/**",
+      "ui/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/resolver",
+        "to": "resolver"
+      },
+      {
+        "from": "../docs/licenses",
+        "to": "licenses"
+      },
+      {
+        "from": "../LICENSE",
+        "to": "licenses/Spot-Music-AGPL-3.0.txt"
+      },
+      {
+        "from": "THIRD_PARTY.md",
+        "to": "licenses/Desktop-THIRD-PARTY.md"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "artifactName": "Spot-Music-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.music",
+      "identity": null,
+      "icon": "resources/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "AudioVideo",
+      "icon": "resources/icon.png",
+      "maintainer": "Spot Music contributors",
+      "syncDesktopName": true
+    }
+  },
+  "homepage": "https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER.git"
+  },
+  "desktopName": "spot-music.desktop"
+}

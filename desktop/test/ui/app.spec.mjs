@@ -1,0 +1,58 @@
+import {test,expect,_electron as electron} from '@playwright/test';
+import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {fileURLToPath} from 'node:url';
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+test('desktop library, dedicated browse pages, album menu, cached playback and seeking',async()=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),'spot-ui-'));
+  const art='https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e029b9b36b0e22870b9f542d937';
+  const track={isrc:'desktop-fixture',title:'First UI Song',artist:'Daft Punk',album:'Random Access Memories',albumUri:'spotify:album:4m2880jivSbbyEGAKfITCa',albumArtUrl:art,durationMs:60000,source:'SPOTIFY'};
+  await mkdir(path.join(directory,'audio'));
+  const bytes=8000*60*2,wav=Buffer.alloc(44+bytes);wav.write('RIFF');wav.writeUInt32LE(bytes+36,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(bytes,40);
+  await writeFile(path.join(directory,'audio/fixture.audio'),wav);
+  await writeFile(path.join(directory,'audio/sources.json'),JSON.stringify([{id:track.isrc,file:'fixture.audio',mime:'audio/wav',expires:0}]));
+  await writeFile(path.join(directory,'library.json'),JSON.stringify({version:1,favorites:[track],playlists:[{id:'fixture',title:'UI Reference Playlist',tracks:[track],createdAt:1}],shows:[],history:[{track,playedAt:1,plays:1}],positions:{}}));
+  const flags=process.platform==='linux'?['--no-sandbox','--ozone-platform=x11']:[];
+  const app=await electron.launch({...(process.env.SPOT_PACKAGED_EXEC?{executablePath:process.env.SPOT_PACKAGED_EXEC}:{}),args:[...(process.env.SPOT_PACKAGED_EXEC?[]:[root]),...flags],env:{...process.env,SPOT_TEST_DATA:directory}});
+  try{
+    const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page.getByRole('heading',{name:'Daily Mixes',exact:true})).toBeVisible();
+    expect(await page.evaluate(()=>typeof window.require)).toBe('undefined');expect(await page.evaluate(()=>typeof window.process)).toBe('undefined');
+    await page.getByRole('button',{name:'Search',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Browse all',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Charts',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Charts',exact:true})).toBeVisible();
+    await expect(page.getByRole('textbox',{name:'Search music and podcasts'})).toHaveCount(0);
+    await page.getByRole('button',{name:'Back',exact:true}).click();
+    await expect(page.getByRole('textbox',{name:'Search music and podcasts'})).toHaveValue('');
+    await page.getByRole('button',{name:'Your Library',exact:true}).click();
+    await page.locator('#content').getByRole('button',{name:/UI Reference Playlist/}).click();
+    await expect(page.getByRole('heading',{name:'UI Reference Playlist',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Options for First UI Song',exact:true}).click();
+    await page.getByRole('button',{name:'Go to album',exact:true}).click();
+    await expect(page.locator('#search-input')).toHaveCount(0);
+    await page.getByRole('button',{name:'Back',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'UI Reference Playlist',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Play collection',exact:true}).click();
+    await expect.poll(()=>page.locator('#audio').evaluate(el=>!el.paused&&el.currentTime>0),{timeout:15000}).toBe(true);
+    await page.getByRole('button',{name:'Open player',exact:true}).click();
+    const seek=page.getByRole('dialog',{name:'Now playing'}).getByRole('slider',{name:'Playback position'});
+    await seek.scrollIntoViewIfNeeded();
+    const box=await seek.boundingBox();
+    await page.mouse.click(box.x+box.width*.5,box.y+box.height/2);
+    await expect.poll(()=>page.locator('#audio').evaluate(el=>el.currentTime)).toBeGreaterThan(25);
+    await expect.poll(()=>page.locator('.full-player .cover img').evaluateAll(images=>images.some(img=>img.complete&&img.naturalWidth>0)),{timeout:15000}).toBe(true);
+    await mkdir(path.join(root,'test-results/screenshots'),{recursive:true});
+    await page.screenshot({path:path.join(root,'test-results/screenshots/player.png')});
+    await page.getByRole('button',{name:'Close player',exact:true}).click();
+    await page.getByRole('button',{name:'Import from Spotify',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Bring your music with you',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Home',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Daily Mixes',exact:true})).toBeVisible();
+    await page.screenshot({path:path.join(root,'test-results/screenshots/home.png')});
+    expect(errors).toEqual([]);
+  }finally{await app.close();await rm(directory,{recursive:true,force:true});}
+});

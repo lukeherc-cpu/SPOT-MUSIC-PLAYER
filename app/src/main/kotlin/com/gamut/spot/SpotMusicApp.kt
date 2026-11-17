@@ -255,15 +255,15 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
             }
         }
         createName?.let { name -> AlertDialog(onDismissRequest = { createName = null }, containerColor = Card, title = { Text("Give your playlist a name") }, text = { OutlinedTextField(name, { createName = it }, singleLine = true) }, confirmButton = { TextButton(onClick = { vm.createPlaylist(name); createName = null }) { Text("Create") } }, dismissButton = { TextButton(onClick = { createName = null }) { Text("Cancel", color = Color.White) } }) }
-        actions?.let { song -> ModalBottomSheet(onDismissRequest = { actions = null }, containerColor = Color(0xFF222222)) {
-            Column(Modifier.padding(bottom = 28.dp)) {
+        actions?.let { song -> ModalBottomSheet(onDismissRequest = { actions = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Color(0xFF222222)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) {
                 SLibraryRow(song.title, song.artist, song.albumArtUrl) {}
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.White.copy(alpha = .1f))
                 MenuRow(if (song.isrc in favoriteIds) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, if (song.isrc in favoriteIds) "Remove from Liked Songs" else "Save to Liked Songs") { vm.favorite(song); actions = null }
+                if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 MenuRow(Icons.Outlined.PlaylistAdd, "Add to playlist") { addToPlaylist = song; actions = null }
                 MenuRow(Icons.Outlined.QueueMusic, "Add to queue") { vm.player.addToQueue(song); actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
-                if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 MenuRow(Icons.Outlined.Person, "Go to artist") { vm.search(song.artist); searchFilter = "Artists"; navigate(Page.Search); actions = null }
                 MenuRow(Icons.Outlined.Share, "Share") {
                     val text = if (song.source == TrackSource.SPOTIFY) "https://open.spotify.com/track/${song.isrc.removePrefix("spotify:")}" else "${song.title} — ${song.artist}"
