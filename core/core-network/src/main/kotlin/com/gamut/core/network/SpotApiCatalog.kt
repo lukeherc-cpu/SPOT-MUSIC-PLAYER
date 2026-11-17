@@ -7,6 +7,7 @@ package com.gamut.core.network
 
 import com.gamut.core.model.Track
 import com.gamut.core.model.TrackSource
+import com.gamut.core.model.TrackArtist
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.crypto.Mac
@@ -33,7 +34,8 @@ interface SpotifyCatalog {
 
 data class SpotifyCard(val uri: String, val title: String, val subtitle: String, val artwork: String?, val type: String)
 data class SpotifySearch(val tracks: List<Track> = emptyList(), val albums: List<SpotifyCard> = emptyList(), val artists: List<SpotifyCard> = emptyList(), val playlists: List<SpotifyCard> = emptyList(), val podcasts: List<SpotifyCard> = emptyList())
-data class SpotifyCollection(val uri: String, val title: String, val subtitle: String, val artwork: String?, val description: String, val tracks: List<Track>, val total: Int, val skipped: Int = 0, val albums: List<SpotifyCard> = emptyList())
+data class SpotifyArtistInfo(val monthlyListeners: Long = 0, val followers: Long = 0, val verified: Boolean = false, val header: String? = null, val biography: String = "", val latest: List<SpotifyCard> = emptyList(), val related: List<SpotifyCard> = emptyList())
+data class SpotifyCollection(val uri: String, val title: String, val subtitle: String, val artwork: String?, val description: String, val tracks: List<Track>, val total: Int, val skipped: Int = 0, val albums: List<SpotifyCard> = emptyList(), val artistInfo: SpotifyArtistInfo? = null)
 
 
 /** Native Android adaptation of Aran404/SpotAPI's anonymous public catalogue protocol. */
@@ -108,7 +110,18 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         }
         return SpotifyCollection(resource, root.s("name").ifBlank { root.o("profile").s("name") },
             if (type == "artist") "Artist" else if (type == "album") artistNames(root).ifBlank { "Album" } else root.o("ownerV2").o("data").s("name").ifBlank { "Spotify playlist" },
-            artwork(root), root.s("description").ifBlank { root.o("profile").o("biography").s("text") }.replace(Regex("<[^>]*>"), ""), tracks, total, skipped, if (type == "artist") artistAlbums(root.o("discography")) else emptyList())
+            artwork(root), root.s("description").ifBlank { root.o("profile").o("biography").s("text") }.replace(Regex("<[^>]*>"), ""), tracks, total, skipped, if (type == "artist") artistAlbums(root.o("discography")) else emptyList(),
+            if (type == "artist") SpotifyArtistInfo(
+                monthlyListeners = root.o("stats").n("monthlyListeners"), followers = root.o("stats").n("followers"),
+                verified = root.o("profile").o("verified").b("verified") == true || root.o("profile").b("verified") == true,
+                header = bestImage(root.o("visuals").o("headerImage").a("sources")),
+                biography = root.o("profile").o("biography").s("text").replace(Regex("<[^>]*>"), "").take(12_000),
+                latest = artistAlbums(root.o("discography").o("latest")).ifEmpty { artistAlbums(root.o("discography"), listOf("latest")) },
+                related = root.o("relatedContent").o("relatedArtists").a("items").mapNotNull { value ->
+                    val artist = unwrap(value); val uri = artist.s("uri"); val name = artist.o("profile").s("name")
+                    if (uri.startsWith("spotify:artist:") && name.isNotBlank()) SpotifyCard(uri, name, "Artist", artwork(artist), "artist") else null
+                },
+            ) else null)
     }
 
     private suspend fun execute(operation: String, variables: JsonObject): JsonObject {
@@ -259,10 +272,17 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
             return item
         }
         private fun artistNames(track: JsonObject): String = track.o("artists").a("items").map { it.obj().let { artist -> artist.o("profile").s("name").ifBlank { artist.s("name") } } }.filter(String::isNotBlank).joinToString(", ")
-        private fun artwork(item: JsonObject): String? {
+        internal fun artwork(item: JsonObject): String? {
             val sources = item.o("coverArt").a("sources").ifEmpty { item.o("visuals").o("avatarImage").a("sources") }.ifEmpty { item.o("images").a("items").firstOrNull()?.obj()?.a("sources").orEmpty() }
-            return sources.map { it.obj().s("url") }.firstOrNull { url -> runCatching { url.toHttpUrl().let { it.isHttps && (it.host.endsWith(".scdn.co") || it.host == "i.scdn.co") } }.getOrDefault(false) }
+            return bestImage(sources)
         }
+        private fun bestImage(sources: List<JsonElement>): String? = sources.map { it.obj() }.filter { image ->
+            runCatching { image.s("url").toHttpUrl().let { it.isHttps && (it.host.endsWith(".scdn.co") || it.host.endsWith(".spotifycdn.com") || it.host == "i.scdn.co") } }.getOrDefault(false)
+        }.maxByOrNull { maxOf(it.n("width"), it.n("height")) }?.s("url")
+        private fun trackArtists(track: JsonObject): List<TrackArtist> = track.o("artists").a("items").mapNotNull { value ->
+            val artist = unwrap(value); val name = artist.o("profile").s("name").ifBlank { artist.s("name") }
+            if (name.isBlank()) null else TrackArtist(name, artist.s("uri").takeIf { it.matches(Regex("spotify:artist:[A-Za-z0-9]{22}")) })
+        }.distinctBy { it.uri ?: it.name }
         private fun decodeTrack(track: JsonObject, fallbackAlbum: JsonObject? = null): Track? {
             val id = track.s("id").ifBlank { track.s("uri").removePrefix("spotify:track:") }
             if (!id.matches(Regex("[A-Za-z0-9]{22}")) || track.s("name").isBlank()) return null
@@ -270,9 +290,11 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
             return Track("spotify:$id", title = track.s("name"), artist = artistNames(track).ifBlank { artistNames(album) }.ifBlank { "Unknown artist" },
                 album = album.s("name"), durationMs = track.o("duration").n("totalMilliseconds"), albumArtUrl = artwork(album), source = TrackSource.SPOTIFY,
                 albumUri = album.s("uri").takeIf { it.matches(Regex("spotify:album:[A-Za-z0-9]{22}")) }
-                    ?: album.s("id").takeIf { it.matches(Regex("[A-Za-z0-9]{22}")) }?.let { "spotify:album:$it" })
+                    ?: album.s("id").takeIf { it.matches(Regex("[A-Za-z0-9]{22}")) }?.let { "spotify:album:$it" },
+                isExplicit = track.o("contentRating").s("label").takeIf { it.isNotBlank() }?.let { it.equals("EXPLICIT", true) } ?: track.b("explicit"),
+                artists = trackArtists(track).ifEmpty { trackArtists(album) })
         }
-        private fun artistAlbums(root: JsonObject): List<SpotifyCard> {
+        private fun artistAlbums(root: JsonObject, sections: List<String> = listOf("albums", "singles", "popularReleasesAlbums")): List<SpotifyCard> {
             val result = mutableListOf<SpotifyCard>()
             fun visit(value: JsonElement, depth: Int) {
                 if (depth > 10 || result.size >= 40) return
@@ -282,7 +304,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
                     else value.values.forEach { visit(it, depth + 1) }
                 } else if (value is JsonArray) value.forEach { visit(it, depth + 1) }
             }
-            listOf("albums", "singles", "popularReleasesAlbums").forEach { root[it]?.let { value -> visit(value, 0) } }
+            sections.forEach { root[it]?.let { value -> visit(value, 0) } }
             return result.distinctBy { it.uri }
         }
         private fun cards(root: JsonObject, section: String, type: String): List<SpotifyCard> {
@@ -304,6 +326,7 @@ private fun JsonElement.obj() = this as? JsonObject ?: JsonObject(emptyMap())
 private fun JsonObject.o(key: String) = this[key]?.obj() ?: JsonObject(emptyMap())
 private fun JsonObject.s(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
 private fun JsonObject.n(key: String) = (this[key] as? JsonPrimitive)?.longOrNull ?: 0L
+private fun JsonObject.b(key: String) = (this[key] as? JsonPrimitive)?.booleanOrNull
 private fun JsonObject.a(key: String) = this[key] as? JsonArray ?: JsonArray(emptyList())
 private fun spotifyTotp(key: ByteArray, timestampMs: Long): String {
     val mac = Mac.getInstance("HmacSHA1").apply { init(SecretKeySpec(key, "HmacSHA1")) }

@@ -9,19 +9,20 @@
   "main": "src/main.mjs",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.mjs",
+    "test": "node test/core.test.mjs",
     "test:ui": "playwright test",
     "prepare:resolver": "node scripts/resolver.mjs",
     "pack": "electron-builder --dir --publish never",
     "dist": "electron-builder --publish never"
   },
   "dependencies": {
-    "fast-xml-parser": "5.12.1"
+    "fast-xml-parser": "5.12.1",
+    "hls.js": "1.7.4"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
     "electron": "45.3.3",
-    "electron-builder": "26.18.0",
-    "@playwright/test": "1.65.1"
+    "electron-builder": "26.18.0"
   },
   "build": {
     "appId": "com.lukeherc.spotmusic.desktop",
@@ -47,6 +48,10 @@
       {
         "from": "THIRD_PARTY.md",
         "to": "licenses/Desktop-THIRD-PARTY.md"
+      },
+      {
+        "from": "node_modules/hls.js/LICENSE",
+        "to": "licenses/HLS-js-BSD-2-Clause.txt"
       }
     ],
     "directories": {

@@ -50,10 +50,11 @@ jobs:
             platform: mac
             target: mac
             arch: x64
-          - os: macos-26
+          - os: macos-26-intel
             platform: mac
             target: mac
             arch: arm64
+            cross: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -78,7 +79,7 @@ jobs:
       - name: Unit checks
         run: npm test
       - name: Desktop navigation and local audio playback
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && matrix.cross != true
         run: npm run test:ui
       - name: Linux navigation and local audio playback
         if: runner.os == 'Linux'
@@ -89,19 +90,25 @@ jobs:
         run: |
           npm version "0.2.0-alpha.${GITHUB_RUN_NUMBER}" --no-git-tag-version --allow-same-version
           npm run dist -- --${{ matrix.target }} --${{ matrix.arch }}
-          node scripts/check-package.mjs
+          SPOT_TARGET_ARCH=${{ matrix.arch }} node scripts/check-package.mjs
       - name: Verify the packaged desktop application
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && matrix.cross != true
         run: node scripts/package-smoke.mjs
       - name: Verify the packaged Linux application
         if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/package-smoke.mjs
+      - name: Verify cross-built Apple Silicon binaries and bundled player
+        if: matrix.cross == true
+        env:
+          EXPECTED_DESKTOP_VERSION: 0.2.0-alpha.${{ github.run_number }}
+        run: node scripts/check-apple-silicon.mjs
       - name: Publish installers, checksums and UI previews
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           PLATFORM: ${{ matrix.platform }}
           ARCH: ${{ matrix.arch }}
+          SKIP_PREVIEWS: ${{ matrix.cross }}
         run: node scripts/publish.mjs
   publish:
     needs: [prepare, desktop]

@@ -35,8 +35,8 @@ internal fun SpotBrowseScreen(state: SpotBrowse, home: SpotHome, vm: SpotViewMod
                 }, color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
-        if (state.category == BrowseCategory.Music) item { DailyMixRail(home.mixes, home.loading, vm::openMix, vm::refreshHome) }
-        if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = Green) }
+        if (state.category == BrowseCategory.Music) item { DailyMixRail(home.mixes, home.loading, vm::openMix) }
+        if (state.loading) item { DiscoverySkeleton() }
         state.error?.let { error -> item { ErrorRow(error) { vm.openBrowse(state.category) } } }
         state.content.rails.forEach { rail -> item { SCardRail(rail.title, rail.cards, vm::openCard) } }
         if (state.content.songs.isNotEmpty()) item { SHeading(if (state.category == BrowseCategory.Charts) "Leading the US chart" else "Songs to discover") }
@@ -46,11 +46,8 @@ internal fun SpotBrowseScreen(state: SpotBrowse, home: SpotHome, vm: SpotViewMod
 }
 
 @Composable
-internal fun DailyMixRail(mixes: List<DailyMix>, loading: Boolean, open: (DailyMix) -> Unit, refresh: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        SHeading("Daily Mixes", Modifier.weight(1f))
-        SIcon(Icons.Outlined.Refresh, "Refresh recommendations", onClick = refresh)
-    }
+internal fun DailyMixRail(mixes: List<DailyMix>, loading: Boolean, open: (DailyMix) -> Unit) {
+    SHeading("Daily Mixes")
     if (mixes.isEmpty()) {
         Text(if (loading) "Making your mixes…" else "Listen to music to shape your mixes.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     } else LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

@@ -1,6 +1,7 @@
+import Hls, {FetchLoader} from './hls.mjs';
 const api=window.spot;
 const state={route:{type:'home'},history:[],library:{favorites:[],playlists:[],shows:[],history:[],positions:{}},home:{mixes:[],rails:[],songs:[]},queue:[],index:0,now:null,playing:false,opening:false,full:false,menu:null,modal:null,query:'',filter:'All',libraryFilter:'All',shuffle:false,repeat:false,request:0,playRequest:0};
-const content=document.querySelector('#content'),audio=document.querySelector('#audio'),refs=new Map(),queues=new Map();let reference=0,searchTimer,toastTimer,seeking=false,recorded=false,retried=false,lastPositionSave=0;
+const content=document.querySelector('#content'),audio=document.querySelector('#audio'),refs=new Map(),queues=new Map();let reference=0,searchTimer,toastTimer,seeking=false,recorded=false,retried=0,lastPositionSave=0,recovery=null,hls=null;
 const paths={home:'M3 10l9-7 9 7v11h-6v-7H9v7H3z',search:'M21 21l-5-5M18 10a8 8 0 11-16 0 8 8 0 0116 0',library:'M4 3v18M9 3v18M14 4l5-1 3 17-5 1z',plus:'M12 4v16M4 12h16',back:'M15 5l-7 7 7 7',play:'M8 4l13 8-13 8z',pause:'M8 4v16M16 4v16',previous:'M5 5v14M19 4L7 12l12 8z',next:'M19 5v14M5 4l12 8-12 8z',more:'M12 5h.01M12 12h.01M12 19h.01',save:'M12 7v10M7 12h10M22 12a10 10 0 11-20 0 10 10 0 0120 0',check:'M5 12l4 4L20 5',download:'M12 3v12M7 10l5 5 5-5M4 18v3h16v-3',album:'M22 12a10 10 0 11-20 0 10 10 0 0120 0M15 12a3 3 0 11-6 0 3 3 0 016 0',artist:'M16 7a4 4 0 11-8 0 4 4 0 018 0M4 21v-3a8 8 0 0116 0v3',queue:'M3 5h17M3 10h17M3 15h10M17 15l5 4-5 4z',volume:'M3 9h4l5-5v16l-5-5H3zM16 8a6 6 0 010 8M19 4a11 11 0 010 16',refresh:'M20 7v5h-5M4 17v-5h5M5 7a8 8 0 0113-2l2 2M4 17l2 2a8 8 0 0013-2',close:'M5 5l14 14M19 5L5 19',shuffle:'M3 6h3l12 12h3M17 14l4 4-4 4M3 18h3l12-12h3M17 2l4 4-4 4',repeat:'M4 8h14l-3-3M20 16H6l3 3M18 8l3-3M6 16l-3 3'};
 const h=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon=name=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.album}"/></svg>`;
@@ -39,7 +40,20 @@ else if(state.full&&state.now){root.innerHTML=`<div class="overlay" data-dismiss
 else root.innerHTML='';syncProgress();}
 async function visit(route,push=true){if(push)state.history.push({...state.route,scroll:document.querySelector('#main').scrollTop});state.route={...route};const ticket=++state.request;document.querySelector('#main').scrollTop=route.scroll||0;render();if(route.data)return;let loader;if(route.type==='home')loader=()=>call('home');else if(route.type==='search'&&state.query.trim())loader=()=>call('search',state.query.trim());else if(route.type==='browse')loader=()=>call('browse',route.title);else if(route.type==='collection')loader=()=>call('collection',route.uri);else if(route.type==='album')loader=()=>call('album',route.track);else if(route.type==='show')loader=()=>call('episodes',route.show);if(!loader)return;state.route.loading=true;render();try{const data=await loader();if(ticket!==state.request)return;state.route.data=data;if(route.type==='home')state.home=data;if(['search','collection','album','detail'].includes(route.type)&&data.tracks?.length)void call('prefetch',data.tracks.slice(0,2)).catch(()=>{});}catch(e){if(ticket!==state.request)return;state.route.error=e.message;}finally{if(ticket===state.request){state.route.loading=false;render();}}}
 async function reloadLibrary(){state.library=await call('library');if(!state.home.mixes?.length){const music=[...new Map([...state.library.history.map(x=>x.track),...state.library.favorites].filter(t=>t.source!=='PODCAST').map(t=>[t.isrc,t])).values()];const artists=[...new Set(music.map(t=>t.artist))].slice(0,3);state.home={mixes:artists.map((artist,i)=>({id:`daily-mix-${i+1}`,title:`Daily Mix ${i+1}`,subtitle:artist+' and your recent favorites',tracks:music.filter(t=>t.artist===artist),artwork:music.find(t=>t.artist===artist)?.albumArtUrl})),rails:[],songs:music.slice(0,10)};}}
-async function startTrack(tracks,index=0){if(!tracks?.length)return;const request=++state.playRequest;audio.pause();state.queue=tracks;state.index=index;state.now=tracks[index];if('mediaSession'in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:state.now.title,artist:state.now.artist,album:state.now.album||''});state.opening=true;state.playing=false;recorded=false;retried=false;renderPlayer();renderOverlays();try{const source=await call('resolve',state.now);if(request!==state.playRequest)return;audio.src=source.url;await audio.play();if(request!==state.playRequest)return;state.opening=false;renderPlayer();renderOverlays();}catch(e){if(request!==state.playRequest)return;state.opening=false;error(e);renderPlayer();renderOverlays();}}
+async function attachAudio(source){
+  hls?.destroy();hls=null;
+  if(source.kind==='hls'&&Hls.isSupported()){
+    if(!Hls.isSupported())throw Error('This device cannot decode the available audio stream.');
+    const instance=new Hls({loader:FetchLoader,enableWorker:false,backBufferLength:30,maxBufferLength:20,maxMaxBufferLength:60,lowLatencyMode:false});hls=instance;
+    await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(Error('The music stream timed out.')),25000);
+      instance.on(Hls.Events.MANIFEST_PARSED,()=>{clearTimeout(timer);resolve();});
+      instance.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal){console.warn('Audio playback error',data.details,data.response?.code||'');clearTimeout(timer);reject(Error(`Stream failed: ${data.details}`));if(state.now&&!state.opening)void recoverAudio();}});
+      instance.attachMedia(audio);instance.loadSource(source.url);
+    });
+  }else{audio.src=source.url;audio.load();}
+}
+async function startTrack(tracks,index=0){if(!tracks?.length)return;const request=++state.playRequest;audio.pause();state.queue=tracks;state.index=index;state.now=tracks[index];if('mediaSession'in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:state.now.title,artist:state.now.artist,album:state.now.album||''});state.opening=true;state.playing=false;recorded=false;retried=0;renderPlayer();renderOverlays();try{const source=await call('resolve',state.now);if(request!==state.playRequest)return;await attachAudio(source);await audio.play();if(request!==state.playRequest)return;state.opening=false;renderPlayer();renderOverlays();}catch(e){if(request!==state.playRequest)return;if(e.name==='NotSupportedError'||audio.error){await recoverAudio();return;}state.opening=false;error(e);renderPlayer();renderOverlays();}}
 function duration(){return Number.isFinite(audio.duration)?audio.duration:(state.now?.durationMs||0)/1000;}
 function syncProgress(){const total=duration(),position=audio.currentTime||0;document.querySelectorAll('[data-seek]').forEach(el=>{if(!seeking)el.value=total?Math.floor(position/total*1000):0;el.style.setProperty('--played',`${Number(el.value)/10}%`);});document.querySelectorAll('[data-time="current"]').forEach(el=>el.textContent=time(position));document.querySelectorAll('[data-time="total"]').forEach(el=>el.textContent=time(total));}
 function advance(direction=1){if(!state.queue.length)return;let index=state.index+direction;if(state.shuffle&&state.queue.length>1)index=(state.index+1+Math.floor(Math.random()*(state.queue.length-1)))%state.queue.length;if(index<0)index=0;if(index>=state.queue.length){if(!state.repeat)return;index=0;}void startTrack(state.queue,index);}
@@ -96,7 +110,33 @@ audio.addEventListener('pause',()=>{state.playing=false;renderPlayer();renderOve
 audio.addEventListener('ended',()=>advance());
 audio.addEventListener('loadedmetadata',()=>{if(state.now?.source==='PODCAST'){const position=state.library.positions[state.now.isrc];if(position>0)audio.currentTime=Math.min(position/1000,Math.max(0,duration()-5));}syncProgress();});
 audio.addEventListener('timeupdate',()=>{syncProgress();if(state.now?.source==='PODCAST'&&Date.now()-lastPositionSave>5000){lastPositionSave=Date.now();const ms=Math.floor(audio.currentTime*1000);state.library.positions[state.now.isrc]=ms;void call('position',state.now.isrc,ms).catch(()=>{});}});
-audio.addEventListener('error',async()=>{if(!state.now)return;const request=state.playRequest;if(!retried){retried=true;try{const source=await call('resolve',state.now,true);if(request!==state.playRequest)return;const position=audio.currentTime;audio.src=source.url;audio.currentTime=position;await audio.play();return;}catch{}}state.opening=false;state.playing=false;toast('This audio source is unavailable. Try another song or update Spot Music.');renderPlayer();renderOverlays();});
+async function recoverAudio(){
+  if(!state.now)return;
+  const request=state.playRequest;
+  if(recovery?.request===request)return recovery.promise;
+  const track=state.now,position=Number.isFinite(audio.currentTime)?audio.currentTime:0;
+  const promise=(async()=>{
+    state.opening=true;renderPlayer();renderOverlays();
+    while(retried<2&&request===state.playRequest){
+      const codec=++retried===1?'opus':'hls';
+      try{
+        const source=await call('resolve',track,true,codec);
+        if(request!==state.playRequest)return;
+        await attachAudio(source);
+        await audio.play();
+        if(request!==state.playRequest)return;
+        if(position>0&&Number.isFinite(audio.duration))audio.currentTime=Math.min(position,Math.max(0,audio.duration-1));
+        state.opening=false;renderPlayer();renderOverlays();return;
+      }catch{}
+    }
+    if(request!==state.playRequest)return;
+    state.opening=false;state.playing=false;
+    toast('The music provider rejected the available streams. Try another song or pull to refresh; your saved library is intact.');
+    renderPlayer();renderOverlays();
+  })();
+  recovery={request,promise};try{return await promise;}finally{if(recovery?.request===request)recovery=null;}
+}
+audio.addEventListener('error',()=>{void recoverAudio();});
 if('mediaSession'in navigator){for(const [name,handler] of Object.entries({play:()=>audio.play(),pause:()=>audio.pause(),nexttrack:()=>advance(),previoustrack:()=>advance(-1),seekbackward:()=>audio.currentTime=Math.max(0,audio.currentTime-15),seekforward:()=>audio.currentTime=Math.min(duration(),audio.currentTime+15),seekto:details=>{audio.currentTime=details.seekTime;}}))navigator.mediaSession.setActionHandler(name,handler);}
 setInterval(()=>{if(state.route.type==='home')void visit({type:'home'},false);},30*60000);
 render();reloadLibrary().then(()=>visit({type:'home'},false)).catch(e=>{state.route={type:'home',error:e.message};render();});

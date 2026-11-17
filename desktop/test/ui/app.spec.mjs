@@ -1,5 +1,5 @@
 import {test,expect,_electron as electron} from '@playwright/test';
-import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -12,8 +12,12 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
   await mkdir(path.join(directory,'audio'));
   const bytes=8000*60*2,wav=Buffer.alloc(44+bytes);wav.write('RIFF');wav.writeUInt32LE(bytes+36,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(bytes,40);
   await writeFile(path.join(directory,'audio/fixture.audio'),wav);
-  await writeFile(path.join(directory,'audio/sources.json'),JSON.stringify([{id:track.isrc,file:'fixture.audio',mime:'audio/wav',expires:0}]));
-  await writeFile(path.join(directory,'library.json'),JSON.stringify({version:1,favorites:[track],playlists:[{id:'fixture',title:'UI Reference Playlist',tracks:[track],createdAt:1}],shows:[],history:[{track,playedAt:1,plays:1}],positions:{}}));
+  const hlsTrack={...track,isrc:'desktop-hls-fixture',title:'HLS playback check',durationMs:8000};
+  const manifestUrl='https://manifest.googlevideo.com/index.m3u8',segmentUrl='https://manifest.googlevideo.com/segment.ts';
+  await writeFile(path.join(directory,'audio/fixture.m3u8'),'#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:9\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:8.0,\nsegment.ts\n#EXT-X-ENDLIST\n');
+  await writeFile(path.join(directory,'audio/fixture.ts'),Buffer.from(await readFile(path.join(root,'test/fixtures/audio-aac.ts.base64'),'utf8'),'base64'));
+  await writeFile(path.join(directory,'audio/sources.json'),JSON.stringify([{id:track.isrc,file:'fixture.audio',mime:'audio/wav',expires:0},{id:hlsTrack.isrc,file:'fixture.m3u8',url:manifestUrl,kind:'hls',mime:'audio/mp4',expires:0,offlineAssets:{[manifestUrl]:'fixture.m3u8',[segmentUrl]:'fixture.ts'}}]));
+  await writeFile(path.join(directory,'library.json'),JSON.stringify({version:1,favorites:[track,hlsTrack],playlists:[{id:'fixture',title:'UI Reference Playlist',tracks:[track],createdAt:1}],shows:[],history:[{track,playedAt:1,plays:1}],positions:{}}));
   const flags=process.platform==='linux'?['--no-sandbox','--ozone-platform=x11']:[];
   const app=await electron.launch({...(process.env.SPOT_PACKAGED_EXEC?{executablePath:process.env.SPOT_PACKAGED_EXEC}:{}),args:[...(process.env.SPOT_PACKAGED_EXEC?[]:[root]),...flags],env:{...process.env,SPOT_TEST_DATA:directory}});
   try{
@@ -53,6 +57,11 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     await page.getByRole('button',{name:'Home',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Daily Mixes',exact:true})).toBeVisible();
     await page.screenshot({path:path.join(root,'test-results/screenshots/home.png')});
+    await page.locator('#sidebar [data-action="liked"]').click();
+    await page.locator('#audio').evaluate(a=>{a.muted=true;});
+    await page.getByRole('button',{name:'Play HLS playback check',exact:true}).first().click();
+    await expect.poll(()=>page.locator('#audio').evaluate(a=>!a.paused&&a.currentTime>1),{timeout:15000}).toBe(true);
+    expect(await page.locator('#audio').evaluate(a=>a.error?.message||null)).toBeNull();
     expect(errors).toEqual([]);
   }finally{await app.close();await rm(directory,{recursive:true,force:true});}
 });

@@ -12,6 +12,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -63,6 +66,10 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     var page by rememberSaveable { mutableStateOf(Page.Home) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
     var actions by remember { mutableStateOf<Track?>(null) }
+    var saveTrack by remember { mutableStateOf<Track?>(null) }
+    var artistTrack by remember { mutableStateOf<Track?>(null) }
+    var miniBounds by remember { mutableStateOf<Rect?>(null) }
+    var pullRequested by remember { mutableStateOf(false) }
     var addToPlaylist by remember { mutableStateOf<Track?>(null) }
     var createSheet by remember { mutableStateOf(false) }
     var createName by remember { mutableStateOf<String?>(null) }
@@ -81,6 +88,8 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(shared) { if (shared != null) { importLink = shared!!; navigate(Page.Import); consumeLink() } }
     LaunchedEffect(detail?.key) { if (page == Page.Import && detail?.key?.toLongOrNull() != null) page = Page.Library }
+    LaunchedEffect(home.loading) { if (!home.loading) pullRequested = false }
+    LaunchedEffect(searchFilter, search.query) { if (searchFilter == "YouTube") vm.searchYoutube() }
     LaunchedEffect(page) {
         if (page == Page.Home) while (isActive) { vm.refreshHomeIfStale(); delay(60_000) }
     }
@@ -88,14 +97,17 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
         when { fullPlayer -> fullPlayer = false; detail != null || browse != null -> vm.backDetail(); else -> navigate(Page.Home) }
     }
     SpotTheme {
+        CompositionLocalProvider(LocalArtistTap provides { song -> artistTrack = song }, LocalSaveTrack provides { song -> vm.saveToLiked(song); saveTrack = song }) {
+        Box(Modifier.fillMaxSize()) {
         Scaffold(
+            modifier = if (fullPlayer) Modifier.clearAndSetSemantics { } else Modifier,
             containerColor = Black,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
-                if (!fullPlayer) Column(Modifier.background(Brush.verticalGradient(listOf(Black.copy(alpha = .94f), Color.Black)))) {
+                Column(Modifier.background(Brush.verticalGradient(listOf(Black.copy(alpha = .94f), Color.Black)))) {
                     if (track != null) SpotMiniPlayer(track, vm.player, isPlaying, opening != null, track.isrc in favoriteIds,
-                        onOpen = { fullPlayer = true }, onSave = { vm.favorite(track) })
+                        onOpen = { fullPlayer = true }, onSave = { vm.saveToLiked(track); saveTrack = track }, onBounds = { miniBounds = it })
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(62.dp), verticalAlignment = Alignment.CenterVertically) {
                         val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic), Triple(Page.Create, "Create", Icons.Outlined.Add))
                         entries.forEach { (target, title, icon) ->
@@ -110,11 +122,11 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
             },
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-                if (fullPlayer && track != null) SpotPlayerScreen(vm, track, isPlaying, opening != null, favoriteIds, onBack = { fullPlayer = false }, onMore = { actions = it }, onSave = { vm.favorite(track) })
+                if (detail?.key?.startsWith("spotify:artist:") == true) SpotArtistScreen(detail!!, vm, favoriteIds, currentId, vm::backDetail) { actions = it }
                 else if (detail != null) SpotCollectionScreen(detail!!, vm, favoriteIds, currentId, onBack = vm::backDetail, onMore = { actions = it }, onImport = { importLink = detail!!.key; navigate(Page.Import) })
                 else if (browse != null) SpotBrowseScreen(browse!!, home, vm, favoriteIds, currentId, onMore = { actions = it })
                 else when (page) {
-                    Page.Home -> LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    Page.Home -> PullToRefreshBox(isRefreshing = pullRequested && home.loading, onRefresh = { pullRequested = true; vm.refreshHome() }) { LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
                         item {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 SAvatar { navigate(Page.Settings) }
@@ -141,22 +153,27 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 } }
                             }
                         }
-                        if (homeFilter != "Podcasts") item { DailyMixRail(home.mixes, home.loading, vm::openMix, vm::refreshHome) }
-                        if (homeFilter != "Music") item { PodcastRail(if (follows.isNotEmpty()) "Your shows" else "Find your next podcast", follows.ifEmpty { home.shows }.take(12), vm::openShow) }
-                        if (homeFilter != "Podcasts") {
-                            home.rails.forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
-                            if (home.songs.isNotEmpty()) {
-                                item { SHeading("Listen again") }
-                                items(home.songs.take(5), key = { "home-song-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { vm.play(song, home.songs) }, onMore = { actions = song }) }
+                        if (homeFilter != "Podcasts") item { DailyMixRail(home.mixes, home.loading, vm::openMix) }
+                        if (homeFilter != "Music") {
+                            if (follows.isNotEmpty()) item { PodcastRail("Your shows", follows.take(12), vm::openShow) }
+                            if (home.shows.isNotEmpty()) item {
+                                PodcastRail("Find your next podcast", home.shows, vm::openShow)
+                                if (home.podcastReason.isNotBlank()) Text(home.podcastReason, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                             }
                         }
+                        if (homeFilter != "Podcasts") {
+                            home.rails.forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
+                            home.rails.flatMap { it.cards }.firstOrNull { it.type == "album" }?.let { card -> item { FeaturedRelease(card) { vm.openCard(card) } } }
+                            item { MusicVideoRail(home.videos) }
+                        }
+                        if (homeFilter != "Music") item { PodcastEpisodeCards(home.episodes, vm) }
                         if (recent.isNotEmpty()) {
                             item { SHeading("Recently played") }
                             items(recent.take(5), key = { "recent-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { vm.play(song, recent) }, onMore = { actions = song }) }
                         }
                         if (home.loading) item { HomeSkeleton() }
                         home.error?.let { error -> item { ErrorRow(error, vm::refreshHome) } }
-                    }
+                    } }
                     Page.Search -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
                         PageTitle("Search", { navigate(Page.Settings) })
                         SearchInput(search.query, vm::search)
@@ -168,14 +185,22 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             }
                         } else {
                             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(listOf("All", "Music", "Podcasts", "Playlists", "Albums", "Artists")) { filter -> SChip(filter, searchFilter == filter) { searchFilter = filter } }
+                                items(listOf("All", "Music", "Podcasts", "Playlists", "Albums", "Artists", "YouTube")) { filter -> SChip(filter, searchFilter == filter) { searchFilter = filter } }
                             }
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                                if (searchFilter == "YouTube") {
+                                    item { Text("YouTube", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp)) }
+                                    item { Text("Search for clean versions, live performances and more. Try adding ‘clean’ to your search.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
+                                    items(search.youtube, key = { "youtube-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.youtube) }, onMore = { actions = song }) }
+                                    if (search.youtubeLoading) item { DiscoverySkeleton() }
+                                    search.youtubeError?.let { message -> item { ErrorRow(message, vm::searchYoutube) } }
+                                    if (!search.youtubeLoading && search.youtubeError == null && search.youtube.isEmpty()) item { Text("No YouTube results yet. Try a song title and artist.", color = Muted, modifier = Modifier.padding(16.dp)) }
+                                }
                                 if (searchFilter in listOf("All", "Music")) {
                                     if (search.tracks.isNotEmpty()) item { SHeading("Songs") }
                                     val songs = if (searchFilter == "All") search.tracks.take(6) else search.tracks
                                     items(songs, key = { "search-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.tracks) }, onMore = { actions = song }) }
-                                    if (search.musicLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = Green) }
+                                    if (search.musicLoading) item { DiscoverySkeleton() }
                                     search.notice?.let { item { Text(it, style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(16.dp)) } }
                                 }
                                 if (searchFilter in listOf("All", "Podcasts")) {
@@ -183,13 +208,13 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     val shows = if (searchFilter == "All") search.shows.take(3) else search.shows
                                     items(shows, key = { "podcast-${it.feedUrl}" }) { show -> SLibraryRow(show.title, "Podcast · ${show.author}", show.artwork) { keyboard?.hide(); vm.openShow(show) } }
                                     if (search.rich.podcasts.isNotEmpty()) item { SCardRail("From Spotify", search.rich.podcasts.take(if (searchFilter == "All") 4 else 25), vm::openCard) }
-                                    if (search.podcastLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = Green) }
+                                    if (search.podcastLoading) item { DiscoverySkeleton() }
                                     search.podcastError?.let { item { ErrorRow(it) { vm.search(search.query) } } }
                                 }
                                 if (searchFilter in listOf("All", "Playlists")) item { SCardRail("Playlists", search.rich.playlists, vm::openCard) }
                                 if (searchFilter in listOf("All", "Albums")) item { SCardRail("Albums", search.rich.albums, vm::openCard) }
                                 if (searchFilter in listOf("All", "Artists")) item { SCardRail("Artists", search.rich.artists, vm::openCard) }
-                                if (!search.musicLoading && !search.podcastLoading && search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty()) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                if (searchFilter != "YouTube" && !search.musicLoading && !search.podcastLoading && search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty()) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
                             }
                         }
                     }
@@ -248,6 +273,12 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 }
             }
         }
+        SpotPlayerTransition(fullPlayer, miniBounds, track) {
+            if (track != null) SpotPlayerScreen(vm, track, isPlaying, opening != null, favoriteIds, onBack = { fullPlayer = false }, onMore = { actions = it }, onSave = { vm.saveToLiked(track); saveTrack = track })
+        }
+        }
+        saveTrack?.let { song -> SpotSaveSheet(song, vm) { saveTrack = null } }
+        artistTrack?.let { song -> SpotArtistSheet(song, vm, { artistTrack = null }, { artistTrack = null; fullPlayer = false }, { artistTrack = null; fullPlayer = false }) }
         if (createSheet) ModalBottomSheet(onDismissRequest = { createSheet = false }, containerColor = Color(0xFF222222)) {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
                 ActionTile(Icons.Outlined.QueueMusic, "Create playlist", "Start with a name, then add music") { createSheet = false; createName = "" }
@@ -261,10 +292,10 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.White.copy(alpha = .1f))
                 MenuRow(if (song.isrc in favoriteIds) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, if (song.isrc in favoriteIds) "Remove from Liked Songs" else "Save to Liked Songs") { vm.favorite(song); actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
-                MenuRow(Icons.Outlined.PlaylistAdd, "Add to playlist") { addToPlaylist = song; actions = null }
+                MenuRow(Icons.Outlined.PlaylistAdd, "Add to playlist") { saveTrack = song; actions = null }
                 MenuRow(Icons.Outlined.QueueMusic, "Add to queue") { vm.player.addToQueue(song); actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
-                MenuRow(Icons.Outlined.Person, "Go to artist") { vm.search(song.artist); searchFilter = "Artists"; navigate(Page.Search); actions = null }
+                if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Person, "Go to artist") { artistTrack = song; actions = null }
                 MenuRow(Icons.Outlined.Share, "Share") {
                     val text = if (song.source == TrackSource.SPOTIFY) "https://open.spotify.com/track/${song.isrc.removePrefix("spotify:")}" else "${song.title} — ${song.artist}"
                     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share song")); actions = null
@@ -278,6 +309,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (playlists.isEmpty()) item { TextButton(onClick = { addToPlaylist = null; createName = "" }) { Text("Create a playlist first") } }
             }
         } }
+        }
     }
 }
 

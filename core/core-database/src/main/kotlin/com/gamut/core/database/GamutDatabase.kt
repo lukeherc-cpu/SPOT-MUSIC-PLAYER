@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RecentEntity::class,
         FollowEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class GamutDatabase : RoomDatabase() {
@@ -106,5 +106,11 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
 val MIGRATION_9_10 = object : Migration(9, 10) {
     override fun migrate(database: SupportSQLiteDatabase) {
         database.execSQL("ALTER TABLE tracks ADD COLUMN albumUri TEXT")
+    }
+}
+
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE tracks ADD COLUMN metadata TEXT")
     }
 }

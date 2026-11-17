@@ -20,6 +20,7 @@ import com.gamut.core.player.StreamQuality
 internal fun SpotSettings(vm: SpotViewModel, onBack: () -> Unit, onImport: () -> Unit) {
     val settings by vm.playbackSettings.state.collectAsState()
     val context = LocalContext.current
+    val updates = remember(context) { updateChannel(context) }
     var quality by remember { mutableStateOf(false) }
     var license by remember { mutableStateOf<String?>(null) }
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -34,8 +35,10 @@ internal fun SpotSettings(vm: SpotViewModel, onBack: () -> Unit, onImport: () ->
         item { SettingSwitch("Mono audio", "Play the same audio in both channels", settings.mono) { value -> vm.playbackSettings.update { it.copy(mono = value) } } }
         item { SHeading("About") }
         item { ListItem(headlineContent = { Text("Spot Music") }, supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}", color = Muted) }) }
+        item { ListItem(headlineContent = { Text("Update channel") }, supportingContent = { Text("$updates · install future APKs from this channel to keep your library", color = Muted) }) }
         item { ListItem(headlineContent = { Text("Gamut · AGPL-3.0") }, supportingContent = { Text("Playback foundation and original project", color = Muted) }, modifier = Modifier.clickable { license = "Gamut-AGPL-3.0.txt" }) }
         item { ListItem(headlineContent = { Text("Aran404/SpotAPI · GPL-3.0") }, supportingContent = { Text("Spotify catalog and collection protocol adaptation", color = Muted) }, modifier = Modifier.clickable { license = "SpotAPI-GPL-3.0.txt" }) }
+        item { ListItem(headlineContent = { Text("ReadAlong · GPL-3.0") }, supportingContent = { Text("Cover flip and mini-player container animation adaptation", color = Muted) }, modifier = Modifier.clickable { license = "ReadAlong-GPL-3.0.txt" }) }
         item { MenuRow(Icons.Outlined.Code, "Source code") { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER"))) } }
         item { MenuRow(Icons.Outlined.BugReport, "Report a problem") { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER/issues/new"))) } }
     }

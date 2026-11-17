@@ -4,6 +4,7 @@ import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.gamut.core.model.Track
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -37,13 +38,33 @@ class PodcastRepository @Inject constructor() {
             val feed = PodcastFeedParser.httpsUrl(value("feedUrl"), "https://itunes.apple.com/") ?: return@mapNotNull null
             if (value("feedUrl").isBlank()) return@mapNotNull null
             PodcastShow(value("collectionId").ifBlank { feed }, value("collectionName"), value("artistName"), feed,
-                value("artworkUrl600").ifBlank { value("artworkUrl100") }.takeIf { it.startsWith("https://") })
+                value("artworkUrl600").ifBlank { value("artworkUrl100") }.takeIf { it.startsWith("https://") },
+                (item["genres"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.filterNot { it == "Podcasts" })
         }.distinctBy { it.feedUrl }
     }
     suspend fun episodes(show: PodcastShow, refresh: Boolean = false): List<PodcastEpisode> = withContext(Dispatchers.IO) {
         if (!refresh) synchronized(cache) { cache[show.feedUrl]?.takeIf { System.currentTimeMillis() - it.first < 15 * 60_000L } }?.let { return@withContext it.second }
         val bytes = fetch(show.feedUrl, PodcastFeedParser.MAX_BYTES)
         PodcastFeedParser.parse(bytes, show.feedUrl).also { synchronized(cache) { cache[show.feedUrl] = System.currentTimeMillis() to it } }
+    }
+    private val transcripts = object : LinkedHashMap<String, PodcastTranscript>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PodcastTranscript>) = size > 12
+    }
+    suspend fun transcript(track: Track): PodcastTranscript? = withContext(Dispatchers.IO) {
+        val sources = track.transcripts.filter { it.type.substringBefore(';') in listOf("text/vtt", "application/x-subrip", "application/srt", "text/srt", "application/json", "text/plain") }
+            .sortedWith(compareBy({ if (it.language.isNullOrBlank() || it.language.orEmpty().startsWith("en")) 0 else 1 }, { if (it.type == "text/plain") 1 else 0 }))
+        var failure: Exception? = null
+        for (source in sources) {
+            synchronized(transcripts) { transcripts[source.url] }?.let { return@withContext it }
+            try {
+                val parsed = PodcastTranscriptParser.parse(fetch(source.url, PodcastTranscriptParser.MAX_BYTES), source.type)
+                synchronized(transcripts) { transcripts[source.url] = parsed }
+                return@withContext parsed
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { failure = e }
+        }
+        if (failure != null) throw failure
+        null
     }
     private suspend fun fetch(initial: String, limit: Int): ByteArray {
         var url = initial.toHttpUrl()

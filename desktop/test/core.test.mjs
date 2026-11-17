@@ -7,7 +7,7 @@ import {Catalog,decodeTrack,resource} from '../src/catalog.mjs';
 import {parseFeed} from '../src/podcasts.mjs';
 import {publicAddress} from '../src/public-network.mjs';
 import {Store} from '../src/store.mjs';
-import {Resolver} from '../src/resolver.mjs';
+import {Resolver,rewriteManifest} from '../src/resolver.mjs';
 import {recommendations,browse,albumForTrack,US,seedArtists} from '../src/discovery.mjs';
 
 const albumUri='spotify:album:4m2880jivSbbyEGAKfITCa';
@@ -52,15 +52,15 @@ test('library mutations survive concurrency and restart; failed mutations do not
 test('saved source URLs persist across restart, expiry forces a new lookup, local files support ranges',async t=>{
   const directory=await mkdtemp(path.join(os.tmpdir(),'spot-audio-'));t.after(()=>rm(directory,{recursive:true,force:true}));
   let calls=0;const runner=async()=>{calls++;return {stdout:JSON.stringify({id:'abcdefghijk',url:`https://rr1.googlevideo.com/audio?expire=${Math.floor(Date.now()/1000)+3600}`,ext:'m4a'})};};
-  const resolver=new Resolver(directory,'unused','unused',runner);await resolver.load();await resolver.resolve(song());assert.equal(calls,1);
-  const restart=new Resolver(directory,'unused','unused',runner);await restart.load();await restart.resolve(song());assert.equal(calls,1);
+  const resolver=new Resolver(directory,'unused','unused',runner,async()=>({statusCode:206,destroy(){}}));await resolver.load();await resolver.resolve(song());assert.equal(calls,1);
+  const restart=new Resolver(directory,'unused','unused',runner,async()=>({statusCode:206,destroy(){}}));await restart.load();await restart.resolve(song());assert.equal(calls,1);
   restart.cache.get('one').expires=0;await restart.resolve(song());assert.equal(calls,2);
   const bytes=Buffer.from('0123456789');await writeFile(path.join(directory,'saved.audio'),bytes);restart.cache.set('one',{id:'one',file:'saved.audio',mime:'audio/wav',expires:0});
   const source=await restart.resolve(song());const response=await restart.response(new Request(source.url,{headers:{Range:'bytes=2-5'}}));
   assert.equal(response.status,206);assert.equal(await response.text(),'2345');assert.equal(response.headers.get('content-range'),'bytes 2-5/10');assert.equal(calls,2);
   for(let i=0;i<501;i++)restart.cache.set(`stream-${i}`,{id:`stream-${i}`,url:'https://rr1.googlevideo.com/audio',expires:Date.now()+3600000});
   await restart.persist();
-  const afterEviction=new Resolver(directory,'unused','unused',runner);await afterEviction.load();
+  const afterEviction=new Resolver(directory,'unused','unused',runner,async()=>({statusCode:206,destroy(){}}));await afterEviction.load();
   assert.equal((await afterEviction.resolve(song())).saved,true);assert.equal(calls,2);
   if(process.platform!=='win32')assert.equal((await stat(path.join(directory,'sources.json'))).mode&0o777,0o600);
 });
@@ -77,4 +77,37 @@ test('Charts loads the real US playlist and album navigation uses album IDs',asy
   const calls=[],catalog={collection:async uri=>{calls.push(uri);return {title:'Top 50 - USA',tracks:[song()],artwork:null};}};
   const result=await browse(catalog,'Charts');assert.deepEqual(calls,[US.uri]);assert.equal(result.rails[0].cards[0].uri,US.uri);
   await albumForTrack(catalog,song());assert.equal(calls[1],albumUri);
+});
+
+test('blocked direct URLs use a playable manifest without changing a chosen YouTube video',async t=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),'spot-hls-unit-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const calls=[];
+  const runner=async(_binary,args)=>{calls.push(args);const hls=args.includes('youtube:player_client=web_safari');return{stdout:JSON.stringify({id:'abcdefghijk',url:hls?'https://manifest.googlevideo.com/index.m3u8':'https://rr1.googlevideo.com/audio',protocol:hls?'m3u8_native':'https',ext:hls?'mp4':'m4a'})};};
+  const request=async()=>({statusCode:403,destroy(){}});
+  const resolver=new Resolver(directory,'unused','unused',runner,request);await resolver.load();
+  const result=await resolver.resolve({...song(),source:'YOUTUBE',youtubeVideoId:'abcdefghijk'});
+  assert.equal(result.kind,'hls');assert.equal(calls.length,2);
+  assert.equal(calls[1].at(-1),'https://www.youtube.com/watch?v=abcdefghijk');
+  assert.equal(resolver.cache.get('one').videoId,'abcdefghijk');
+});
+test('HLS manifests rewrite segments and keys into opaque app URLs and reject other hosts',()=>{
+  const refs=[];
+  const out=rewriteManifest('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:5,\nsegment.ts\n','https://manifest.googlevideo.com/index.m3u8',(url,manifest)=>{refs.push({url,manifest});return `spot://app/audio/${refs.length}`;});
+  assert.ok(out.includes('URI="spot://app/audio/1"'));assert.ok(out.includes('spot://app/audio/2'));
+  assert.equal(refs[1].manifest,false);assert.equal(refs[1].url,'https://manifest.googlevideo.com/segment.ts');
+  assert.throws(()=>rewriteManifest('#EXTM3U\nhttps://example.org/segment.ts','https://manifest.googlevideo.com/index.m3u8',x=>x),/Unsupported/);
+});
+test('saved HLS manifests and segments play after restart without network',async t=>{
+  const {Readable}=await import('node:stream');
+  const directory=await mkdtemp(path.join(os.tmpdir(),'spot-offline-hls-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const base='https://manifest.googlevideo.com/index.m3u8';
+  const requester=async url=>{const stream=Readable.from([Buffer.from(url===base?'#EXTM3U\n#EXTINF:5,\nsegment.ts\n#EXT-X-ENDLIST\n':'media-bytes')]);stream.statusCode=200;stream.headers={'content-type':url===base?'application/vnd.apple.mpegurl':'video/mp2t'};return stream;};
+  const resolver=new Resolver(directory,'unused','unused',async()=>{throw Error('not used');},requester);await resolver.load();
+  resolver.cache.set('one',{id:'one',url:base,kind:'hls',mime:'audio/mp4',expires:Date.now()+3600000});
+  await resolver.download(song());
+  const restart=new Resolver(directory,'unused','unused',async()=>{throw Error('offline');},async()=>{throw Error('offline');});await restart.load();
+  const source=await restart.resolve(song());assert.equal(source.saved,true);assert.equal(source.kind,'hls');
+  const manifest=await (await restart.response(new Request(source.url))).text();
+  const segment=manifest.split('\n').find(x=>x.startsWith('spot:'));
+  assert.equal(await (await restart.response(new Request(segment))).text(),'media-bytes');
 });

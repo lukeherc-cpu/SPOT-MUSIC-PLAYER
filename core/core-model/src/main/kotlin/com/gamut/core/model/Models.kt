@@ -18,7 +18,32 @@ data class Track(
     val youtubeVideoId: String? = null,
     val directAudioUrl: String? = null,
     val albumUri: String? = null,
+    val isExplicit: Boolean? = null,
+    val artists: List<TrackArtist> = emptyList(),
+    val transcripts: List<TranscriptSource> = emptyList(),
 )
+
+@Serializable
+data class TrackArtist(val name: String, val uri: String? = null)
+
+@Serializable
+data class TranscriptSource(val url: String, val type: String, val language: String? = null)
+
+/** Optional catalogue fields share one backwards-compatible Room column. */
+@Serializable
+data class TrackMetadata(
+    val isExplicit: Boolean? = null,
+    val artists: List<TrackArtist> = emptyList(),
+    val transcripts: List<TranscriptSource> = emptyList(),
+) {
+    fun encode(): String = kotlinx.serialization.json.Json.encodeToString(serializer(), this)
+    companion object {
+        private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        fun decode(raw: String?): TrackMetadata = raw?.takeIf { it.length <= 100_000 }?.let {
+            runCatching { json.decodeFromString(serializer(), it) }.getOrNull()
+        } ?: TrackMetadata()
+    }
+}
 
 @Serializable
 data class ResolvedSource(

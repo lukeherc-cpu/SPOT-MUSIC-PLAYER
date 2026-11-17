@@ -4,6 +4,15 @@ import android.content.Intent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.*
+import com.gamut.feature.playerui.LyricsLine
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,7 +40,7 @@ import com.gamut.feature.playerui.LyricsRepository
 import com.gamut.feature.playerui.LyricsState
 
 @Composable
-internal fun SpotMiniPlayer(track: Track, player: MusicPlayer, playing: Boolean, opening: Boolean, saved: Boolean, onOpen: () -> Unit, onSave: () -> Unit) {
+internal fun SpotMiniPlayer(track: Track, player: MusicPlayer, playing: Boolean, opening: Boolean, saved: Boolean, onOpen: () -> Unit, onSave: () -> Unit, onBounds: (Rect) -> Unit = {}) {
     val palette = rememberCoverPalette(track.albumArtUrl)
     val background = lerp(palette.primary, Color(0xFF171717), .68f)
     val state by player.playbackState.collectAsState()
@@ -39,12 +48,12 @@ internal fun SpotMiniPlayer(track: Track, player: MusicPlayer, playing: Boolean,
     val awaiting by player.awaitingAudio.collectAsState()
     val position = when (val value = state) { is PlaybackState.Playing -> value.positionMs; is PlaybackState.Paused -> value.positionMs; else -> 0L }
     val total = duration.takeIf { it > 0 } ?: track.durationMs
-    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(6.dp)).background(background).clickable(onClick = onOpen)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).onGloballyPositioned { onBounds(it.boundsInRoot()) }.clip(RoundedCornerShape(6.dp)).background(background).clickable(onClick = onOpen)) {
         Row(Modifier.fillMaxWidth().height(60.dp).padding(start = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             SArt(track.albumArtUrl, Modifier.size(44.dp))
             Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
                 Text(track.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (opening || awaiting) "Connecting…" else track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (opening || awaiting) "Connecting…" else (if (track.isExplicit == true) "E · " else "") + track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             SIcon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save song", tint = if (saved) Green else Color.White, size = 24.dp, onClick = onSave)
             if (opening || awaiting) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp) }
@@ -68,16 +77,29 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
     val podcast = track.source == TrackSource.PODCAST
     val palette = rememberCoverPalette(track.albumArtUrl)
     val top = lerp(palette.primary, Color.Black, .55f)
+    val wordsColor = lerp(palette.primary, Color(0xFF343D39), .72f)
     val context = LocalContext.current
+    val artistTap = LocalArtistTap.current
     var queueSheet by remember { mutableStateOf(false) }
     var devices by remember { mutableStateOf(false) }
-    var lyricsExpanded by remember { mutableStateOf(false) }
-    var lyrics by remember(track.isrc) { mutableStateOf<LyricsState>(LyricsState.Loading) }
+    var expanded by rememberSaveable(track.isrc) { mutableStateOf(false) }
+    var showWords by rememberSaveable(track.isrc) { mutableStateOf(false) }
+    val flip by animateFloatAsState(if (showWords) 180f else 0f, tween(380), label = "cover text flip")
+    var words by remember(track.isrc) { mutableStateOf<LyricsState>(LyricsState.Loading) }
     var dragging by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(track.isrc) { if (!podcast) lyrics = LyricsRepository.fetchLyrics(track) }
-    LazyColumn(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(top, Black))).statusBarsPadding(), contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 32.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(bottom = 30.dp), verticalAlignment = Alignment.CenterVertically) {
+    LaunchedEffect(track.isrc, showWords) {
+        if (showWords && words is LyricsState.Loading) {
+            words = if (!podcast) LyricsRepository.fetchLyrics(track) else try {
+                vm.podcastTranscript(track)?.let { transcript -> LyricsState.Loaded(transcript.cues.map { LyricsLine(it.startMs, it.text, it.endMs) }, transcript.timed) }
+                    ?: LyricsState.NotAvailable("This publisher hasn't provided a transcript for this episode.")
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { LyricsState.Error("Couldn't load this publisher's subtitles.") }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(top, Black)))) {
+        // The player itself never scrolls. The square artwork gives its space to the text.
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().then(if (expanded) Modifier.clearAndSetSemantics { } else Modifier)) {
+            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 SIcon(Icons.Outlined.KeyboardArrowDown, "Close player", onClick = onBack)
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(if (podcast) "PLAYING EPISODE" else "PLAYING FROM YOUR MUSIC", style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
@@ -85,50 +107,54 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                 }
                 SIcon(Icons.Outlined.MoreVert, "Player options", onClick = { onMore(track) })
             }
-        }
-        item { SArt(track.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f)) }
-        item {
-            Row(Modifier.fillMaxWidth().padding(top = 30.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(track.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(track.artist, color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+                val side = minOf(maxWidth, maxHeight)
+                Box(Modifier.size(side).graphicsLayer { rotationY = flip; cameraDistance = 16 * density }) {
+                    if (flip > 90f) Box(Modifier.fillMaxSize().graphicsLayer { rotationY = 180f }) {
+                        SpotWordsPanel(if (podcast) "Subtitles" else "Lyrics", words, position, wordsColor, false, { expanded = true }, { showWords = false }, vm.player::seekTo)
+                    } else Box(Modifier.fillMaxSize().clickable(onClickLabel = if (podcast) "Show subtitles" else "Show lyrics") { showWords = true }.semantics { contentDescription = if (podcast) "Cover art, show subtitles" else "Cover art, show lyrics" }) {
+                        SArt(track.albumArtUrl, Modifier.fillMaxSize())
+                        Surface(Modifier.align(Alignment.BottomCenter).padding(10.dp), shape = CircleShape, color = Color.Black.copy(alpha = .58f), contentColor = Color.White) {
+                            Text(if (podcast) "Tap for subtitles" else "Tap for lyrics", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
+                        }
+                    }
                 }
-                SIcon(if (track.isrc in favorites) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save to Liked Songs", tint = if (track.isrc in favorites) Green else Color.White, size = 29.dp, onClick = onSave)
             }
-        }
-        item {
-            SpotSeekBar(
-                value = dragging ?: (position.toFloat() / duration).coerceIn(0f, 1f),
-                onChange = { dragging = it },
-                onFinished = { dragging?.let { vm.player.seekTo((it * duration).toLong()) }; dragging = null },
-                onCancel = { dragging = null },
-            )
-            Row(Modifier.fillMaxWidth()) {
-                Text(timeLabel(dragging?.let { (it * duration).toLong() } ?: position), color = Muted, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.weight(1f))
-                Text("−${timeLabel((duration - position).coerceAtLeast(0))}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (track.isExplicit == true) ExplicitBadge()
+                        Text(track.artist, color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { artistTap(track) })
+                    }
+                }
+                SIcon(if (track.isrc in favorites) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save song", tint = if (track.isrc in favorites) Green else Color.White, size = 28.dp, onClick = onSave)
             }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                SpotSeekBar(value = dragging ?: (position.toFloat() / duration).coerceIn(0f, 1f), onChange = { dragging = it }, onFinished = { dragging?.let { vm.player.seekTo((it * duration).toLong()) }; dragging = null }, onCancel = { dragging = null })
+                Row(Modifier.fillMaxWidth()) {
+                    Text(timeLabel(dragging?.let { (it * duration).toLong() } ?: position), color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.weight(1f)); Text("−${timeLabel((duration - position).coerceAtLeast(0))}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Row(Modifier.fillMaxWidth().height(82.dp).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 if (podcast) SIcon(Icons.Outlined.SkipPrevious, "Previous episode", tint = Muted, onClick = vm.player::skipPrevious)
                 else SIcon(Icons.Outlined.Shuffle, "Shuffle", tint = if (shuffle) Green else Muted, onClick = { vm.player.setShuffle(!shuffle) })
-                if (podcast) Text("↶ 15", color = Color.White, fontSize = 20.sp, modifier = Modifier.clickable { vm.player.seekTo((position - 15000).coerceAtLeast(0)) }.padding(12.dp))
+                if (podcast) SIcon(Icons.Outlined.Replay10, "Back 15 seconds", onClick = { vm.player.seekTo((position - 15000).coerceAtLeast(0)) })
                 else SIcon(Icons.Filled.SkipPrevious, "Previous song", size = 36.dp, onClick = vm.player::skipPrevious)
-                FilledIconButton(onClick = { if (playing) vm.player.pause() else vm.player.resume() }, enabled = !opening, modifier = Modifier.size(68.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = Color.Black, disabledContainerColor = Color.White, disabledContentColor = Color.Black)) {
-                    if (opening || awaiting) CircularProgressIndicator(Modifier.size(30.dp), color = Color.Black, strokeWidth = 2.dp)
-                    else Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", Modifier.size(42.dp))
+                FilledIconButton(onClick = { if (playing) vm.player.pause() else vm.player.resume() }, enabled = !opening, modifier = Modifier.size(64.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = Color.Black, disabledContainerColor = Color.White, disabledContentColor = Color.Black)) {
+                    if (opening || awaiting) CircularProgressIndicator(Modifier.size(28.dp), color = Color.Black, strokeWidth = 2.dp)
+                    else Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", Modifier.size(40.dp))
                 }
-                if (podcast) Text("15 ↷", color = Color.White, fontSize = 20.sp, modifier = Modifier.clickable { vm.player.seekTo((position + 15000).coerceAtMost(duration)) }.padding(12.dp))
+                if (podcast) SIcon(Icons.Outlined.Forward10, "Forward 15 seconds", onClick = { vm.player.seekTo((position + 15000).coerceAtMost(duration)) })
                 else SIcon(Icons.Filled.SkipNext, "Next song", size = 36.dp, onClick = vm.player::skipNext)
                 if (podcast) SIcon(Icons.Outlined.SkipNext, "Next episode", tint = Muted, onClick = vm.player::skipNext)
                 else SIcon(if (repeat == RepeatMode.ONE) Icons.Outlined.RepeatOne else Icons.Outlined.Repeat, "Repeat", tint = if (repeat != RepeatMode.OFF) Green else Muted, onClick = { vm.player.setRepeatMode(when (repeat) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) })
             }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 SIcon(Icons.Outlined.SpeakerGroup, "Listening device", size = 22.dp, onClick = { devices = true })
                 Spacer(Modifier.weight(1f))
+                SIcon(Icons.Outlined.Subtitles, if (podcast) "Show subtitles" else "Show lyrics", tint = if (showWords) Green else Color.White, size = 22.dp, onClick = { showWords = !showWords })
                 SIcon(Icons.Outlined.Share, "Share", size = 22.dp, onClick = {
                     val text = if (track.source == TrackSource.SPOTIFY) "https://open.spotify.com/track/${track.isrc.removePrefix("spotify:")}" else "${track.title} — ${track.artist}"
                     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share song"))
@@ -136,21 +162,7 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                 SIcon(Icons.Outlined.QueueMusic, "Queue", size = 22.dp, onClick = { queueSheet = true })
             }
         }
-        if (!podcast) item {
-            val loaded = lyrics as? LyricsState.Loaded
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(lerp(palette.primary, Color(0xFF4A3D13), .8f)).padding(16.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Lyrics", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); SIcon(Icons.Outlined.OpenInFull, "Expand lyrics", size = 20.dp, onClick = { lyricsExpanded = !lyricsExpanded }) }
-                when {
-                    loaded != null -> {
-                        val lines = if (lyricsExpanded) loaded.lines else loaded.lines.take(8)
-                        lines.forEach { line -> Text(line.text.ifBlank { "♪" }, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 31.sp, color = if (!loaded.isSynced || line.timestampMs <= position) Color.White else Color.White.copy(alpha = .55f), modifier = Modifier.fillMaxWidth().clickable(enabled = loaded.isSynced) { vm.player.seekTo(line.timestampMs) }.padding(vertical = 4.dp)) }
-                        if (!lyricsExpanded && loaded.lines.size > 8) TextButton(onClick = { lyricsExpanded = true }) { Text("Show lyrics", color = Color.White) }
-                    }
-                    lyrics is LyricsState.Loading -> Text("Finding lyrics…", style = MaterialTheme.typography.bodyMedium)
-                    else -> Text("Lyrics aren't available for this song.", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
+        if (expanded) FullScreenWords(if (podcast) "Subtitles" else "Lyrics", words, position, wordsColor, { expanded = false }, { expanded = false; showWords = false }, vm.player::seekTo)
     }
     if (queueSheet) ModalBottomSheet(onDismissRequest = { queueSheet = false }, containerColor = Color(0xFF222222)) {
         LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
@@ -161,7 +173,7 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
     if (devices) ModalBottomSheet(onDismissRequest = { devices = false }, containerColor = Color(0xFF222222)) {
         Column(Modifier.padding(24.dp).padding(bottom = 24.dp)) {
             Text("Listening on this device", style = MaterialTheme.typography.titleLarge)
-            Text("Use Android's media output selector to switch between your phone, headphones and connected Bluetooth speakers.", color = Muted, modifier = Modifier.padding(vertical = 20.dp))
+            Text("Switch between your phone, headphones and connected Bluetooth speakers.", color = Muted, modifier = Modifier.padding(vertical = 20.dp))
             Button(onClick = { context.startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)); devices = false }) { Text("Open Bluetooth settings") }
         }
     }

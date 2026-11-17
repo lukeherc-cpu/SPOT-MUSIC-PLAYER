@@ -36,6 +36,14 @@ object PodcastFeedParser {
                 audioUrl = url, description = item.text("description").replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim().take(2000),
                 published = item.text("pubDate"), durationMs = durationMs(item.text("duration")),
                 artwork = image?.getAttribute("href")?.let { httpsUrl(it, feedUrl) },
+                transcripts = item.getElementsByTagNameNS("https://podcastindex.org/namespace/1.0", "transcript").let { sources ->
+                    (0 until minOf(sources.length, 10)).mapNotNull { index ->
+                        val source = sources.item(index) as? Element ?: return@mapNotNull null
+                        val link = httpsUrl(source.getAttribute("url"), feedUrl) ?: return@mapNotNull null
+                        com.gamut.core.model.TranscriptSource(link, source.getAttribute("type").lowercase(), source.getAttribute("language").takeIf { it.isNotBlank() })
+                    }
+                },
+                isExplicit = item.text("explicit").lowercase().let { when (it) { "yes", "true", "explicit" -> true; "no", "false", "clean" -> false; else -> null } },
             )
         }.distinctBy { it.id }
     }

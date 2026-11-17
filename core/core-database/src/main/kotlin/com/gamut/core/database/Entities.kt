@@ -18,6 +18,7 @@ data class TrackEntity(
     val youtubeVideoId: String? = null,
     val directAudioUrl: String? = null,
     val albumUri: String? = null,
+    val metadata: String? = null,
 )
 
 @Entity(tableName = "resolved_sources")

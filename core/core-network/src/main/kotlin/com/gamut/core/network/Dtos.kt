@@ -64,6 +64,7 @@ data class ItunesTrackDto(
     val trackTimeMillis: Long? = null,
     val artworkUrl100: String? = null,
     val kind: String? = null,
+    val trackExplicitness: String? = null,
 )
 
 @Serializable

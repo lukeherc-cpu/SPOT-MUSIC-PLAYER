@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.*
@@ -31,6 +32,8 @@ internal val Black = Color(0xFF121212)
 internal val Card = Color(0xFF282828)
 internal val Muted = Color(0xFFB3B3B3)
 internal val LikedBrush = Brush.linearGradient(listOf(Color(0xFF4C18D6), Color(0xFFBFE6D7)))
+internal val LocalArtistTap = staticCompositionLocalOf<(Track) -> Unit> { {} }
+internal val LocalSaveTrack = staticCompositionLocalOf<(Track) -> Unit> { {} }
 
 @Composable
 internal fun SpotTheme(content: @Composable () -> Unit) {
@@ -73,7 +76,7 @@ internal fun SChip(text: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 internal fun SArt(url: String?, modifier: Modifier = Modifier, liked: Boolean = false, circle: Boolean = false) {
     Box(modifier.clip(if (circle) CircleShape else RoundedCornerShape(3.dp)).then(if (liked) Modifier.background(LikedBrush) else Modifier.background(Card)), contentAlignment = Alignment.Center) {
-        if (url != null && !liked) SubcomposeAsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
+        if (url != null && !liked) SubcomposeAsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.High,
             error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Filled.MusicNote, null, tint = Muted, modifier = Modifier.fillMaxSize(.38f)) } })
         else Icon(if (liked) Icons.Filled.Favorite else Icons.Filled.MusicNote, null, tint = Color.White, modifier = Modifier.fillMaxSize(.38f))
     }
@@ -101,16 +104,27 @@ internal fun SCardRail(title: String, cards: List<SpotifyCard>, open: (SpotifyCa
 
 @Composable
 internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = false, number: Int? = null, artwork: Boolean = true, onPlay: () -> Unit, onMore: () -> Unit) {
+    val artistTap = LocalArtistTap.current
+    val save = LocalSaveTrack.current
     Row(Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (number != null) Text(number.toString(), Modifier.width(28.dp), color = if (playing) Green else Muted, style = MaterialTheme.typography.bodyMedium)
         if (artwork) SArt(track.albumArtUrl, Modifier.size(52.dp))
         Column(Modifier.weight(1f).padding(start = if (artwork) 12.dp else 0.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(track.title, style = MaterialTheme.typography.bodyLarge, color = if (playing) Green else Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (track.isExplicit == true) ExplicitBadge()
+                Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { artistTap(track) })
+            }
         }
-        if (saved) Icon(Icons.Filled.CheckCircle, "Saved", tint = Green, modifier = Modifier.size(20.dp))
+        SIcon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, if (saved) "Saved in playlists" else "Save song", tint = if (saved) Green else Muted, size = 22.dp, onClick = { save(track) })
         SIcon(Icons.Outlined.MoreVert, "Song options", tint = Muted, onClick = onMore)
     }
+}
+
+@Composable
+internal fun ExplicitBadge() {
+    Text("E", color = Black, fontSize = 9.sp, fontWeight = FontWeight.Bold, lineHeight = 12.sp,
+        modifier = Modifier.clip(RoundedCornerShape(2.dp)).background(Muted).padding(horizontal = 3.dp))
 }
 
 @Composable

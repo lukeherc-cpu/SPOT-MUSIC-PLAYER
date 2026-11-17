@@ -34,6 +34,7 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
     var filter by remember { mutableStateOf("") }
     var showFilter by remember { mutableStateOf(false) }
     val shuffle by vm.player.shuffleEnabled.collectAsState()
+    val save = LocalSaveTrack.current
     val context = LocalContext.current
     val songs = remember(detail.tracks, filter) { detail.tracks.filter { filter.isBlank() || it.title.contains(filter, true) || it.artist.contains(filter, true) } }
     LazyColumn(Modifier.fillMaxSize().background(Black), contentPadding = PaddingValues(bottom = 28.dp)) {
@@ -64,7 +65,7 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
             }
         }
         if (showFilter) item { SearchInput(filter) { filter = it } }
-        if (detail.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp)) }
+        if (detail.loading) item { DiscoverySkeleton() }
         detail.error?.let { item { ErrorRow(it, vm::retryDetail) } }
         if (detail.skipped > 0) item { Text("${detail.skipped} unavailable items aren't included.", style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(16.dp)) }
         if (detail.podcast != null) {
@@ -81,7 +82,7 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
                     if (!episode?.description.isNullOrBlank()) Text(episode!!.description, style = MaterialTheme.typography.bodyMedium, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(listOfNotNull(episode?.published?.take(16)?.takeIf { it.isNotBlank() }, (song.durationMs / 60000).takeIf { it > 0 }?.let { "$it min" }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Muted)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SIcon(Icons.Outlined.AddCircleOutline, "Save episode", onClick = { vm.favorite(song) })
+                        SIcon(Icons.Outlined.AddCircleOutline, "Save episode", onClick = { save(song) })
                         SIcon(Icons.Outlined.MoreHoriz, "Episode options", tint = Muted, onClick = { onMore(song) })
                         Spacer(Modifier.weight(1f))
                         Text(if (resume > 0) "Resume · ${timeLabel(resume)}" else "Play", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 8.dp))

@@ -50,6 +50,16 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - uses: actions/checkout@v4
+        with:
+          repository: lukeherc-cpu/SPOT-MUSIC-PLAYER
+          ref: codex/android-alpha-8
+          path: .previous-alpha
+          persist-credentials: false
+      - name: Build the previous and current APKs for an in-place upgrade check
+        run: |
+          (cd .previous-alpha && bash ./gradlew --no-daemon :app:assembleDebug --console=plain -Pgamut.abis=x86_64 -Pgamut.versionName=0.1.0-alpha.8 -Pgamut.versionCode=10008)
+          bash ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --console=plain -Pgamut.abis=x86_64 -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))"
       - name: Android navigation and feed parser checks
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -60,7 +70,14 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -camera-back none
           script: |
-            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain || (adb logcat -d -s TestRunner AndroidRuntime; exit 1)
+            adb install .previous-alpha/app/build/outputs/apk/debug/app-debug.apk
+            adb install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -e class com.gamut.UpgradeInstallTest#seedPreviousInstall -e upgradePhase seed com.lukeherc.spotmusic.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-seed.txt
+            python3 -c "from pathlib import Path; assert 'OK (1 test)' in Path('upgrade-seed.txt').read_text()"
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am instrument -w -e class com.gamut.UpgradeInstallTest#updatePreservesInstalledLibrary -e upgradePhase verify com.lukeherc.spotmusic.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-verify.txt
+            python3 -c "from pathlib import Path; assert 'OK (1 test)' in Path('upgrade-verify.txt').read_text()"
+            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain -Pgamut.abis=x86_64 -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))" || (adb logcat -d -s TestRunner AndroidRuntime; exit 1)
             adb exec-out cat /sdcard/spot-ui-home.png > ui-home.png
             adb exec-out cat /sdcard/spot-ui-search.png > ui-search.png
             adb exec-out cat /sdcard/spot-ui-podcasts.png > ui-podcasts.png
@@ -69,7 +86,10 @@ jobs:
             adb exec-out cat /sdcard/spot-ui-player.png > ui-player.png
             adb exec-out cat /sdcard/spot-ui-import.png > ui-import.png
             adb exec-out cat /sdcard/spot-ui-charts.png > ui-charts.png
-            python3 -c "from pathlib import Path; files=list(Path('.').glob('ui-*.png')); assert len(files)==8; assert all(p.read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a')) and p.stat().st_size > 1000 for p in files)"
+            adb exec-out cat /sdcard/spot-ui-save.png > ui-save.png
+            adb exec-out cat /sdcard/spot-ui-lyrics.png > ui-lyrics.png
+            adb exec-out cat /sdcard/spot-ui-artist.png > ui-artist.png
+            python3 -c "from pathlib import Path; files=list(Path('.').glob('ui-*.png')); assert len(files)==11; assert all(p.read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a')) and p.stat().st_size > 1000 for p in files)"
       - name: Test and build
         run: |
           bash ./gradlew --no-daemon testDebugUnitTest --console=plain
@@ -79,6 +99,8 @@ jobs:
             -Pgamut.repo="$GITHUB_REPOSITORY" -Pgamut.abis=arm64-v8a
           cp app/build/outputs/apk/release/app-release.apk Spot-Music-Android.apk
           sha256sum Spot-Music-Android.apk > SHA256SUMS.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs Spot-Music-Android.apk > SIGNING-IDENTITY.txt
+          python3 -c "from pathlib import Path; assert 'bab3f8d16bf11feee9b15791faac0909e1e9840b27fb79bf21e07a22e3fdce4b' in Path('SIGNING-IDENTITY.txt').read_text(), 'Signing identity changed; do not publish an incompatible update'"
       - name: Publish alpha APK directly to GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,6 +108,11 @@ jobs:
           cat > release-notes.md <<'NOTES'
           Android alpha of Spot Music, based on Gamut, with Spotify catalog discovery adapted from Aran404/SpotAPI.
 
+          - Install over previous GitHub alphas: same signing identity, higher version code and library-preserving database upgrade. The APK and local chat builds use different development keys; use the same download channel as your installed version.
+          - Save-sheet playlist selection, explicit labels, higher-resolution artwork and linked artist credits.
+          - Artist profiles with a right-side thumb navigation rail.
+          - Pull-to-refresh Home, history-based podcast recommendations, varied episode cards and music video links.
+          - YouTube search filter, discovery skeletons, cover-flip lyrics/publisher subtitles and a non-scrolling full player.
           - Dedicated Music, genre, new-release and real US/global chart pages.
           - History-driven Daily Mixes, automatic recommendation refresh and Go to album in song menus.
           - Aligned seek thumb and a library-preserving album-link database upgrade.
@@ -101,6 +128,6 @@ jobs:
 
           Install Spot-Music-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and the previous Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
           NOTES
-          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png \
+          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt SIGNING-IDENTITY.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png ui-save.png ui-lyrics.png ui-artist.png \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
             --title "Spot Music Android alpha ${GITHUB_RUN_NUMBER}" --notes-file release-notes.md

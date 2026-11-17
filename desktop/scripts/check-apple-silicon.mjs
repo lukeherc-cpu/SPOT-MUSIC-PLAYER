@@ -1,0 +1,10 @@
+import {readFile,stat} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {extractFile} from '@electron/asar';
+const base='dist/mac-arm64/Spot Music.app/Contents',root=base+'/Resources';
+for(const file of [base+'/MacOS/Spot Music',root+'/resolver/yt-dlp'])if(!execFileSync('lipo',['-archs',file],{encoding:'utf8'}).includes('arm64'))throw Error('ARM64 architecture missing.');
+const metadata=JSON.parse(extractFile(root+'/app.asar','package.json').toString());
+if(metadata.version!==process.env.EXPECTED_DESKTOP_VERSION)throw Error('Wrong package version.');
+if(extractFile(root+'/app.asar','node_modules/hls.js/dist/hls.light.mjs').length<10000)throw Error('Bundled HLS player missing.');
+if((await stat(root+'/licenses/HLS-js-BSD-2-Clause.txt')).size<100)throw Error('HLS license missing.');
+console.log('Verified Apple Silicon architectures, app version and bundled HLS player. Native ARM64 execution was not tested.');

@@ -11,3 +11,9 @@ Desktop alpha for Windows, macOS and Linux.
 Downloads: Windows x64 `.exe` installer; macOS Intel `mac-x64` or Apple Silicon `mac-arm64` `.dmg`/`.zip`; Linux x64 `.AppImage` or `.deb`. Choose the matching OS and architecture. Prerelease desktop installers are unsigned and macOS builds are not notarized.
 
 Music uses matched public audio sources; Spotify supplies metadata. Independent project, not affiliated with Spotify. AGPL-3.0 with SpotAPI GPL-3.0 attribution retained. Third-party notices and resolver source/version information are included in each package.
+# Playback update
+
+- Fixes fresh music streams rejected by the provider: selects the verified client explicitly and checks direct audio before offering it to the player.
+- Preserves provider headers and the signed stream's IP family; retries an alternate format and HLS when needed.
+- Bundles HLS playback and offline manifest/segment support without requiring a server or a separate runtime.
+- Keeps the existing library and saved audio. Packaged tests now decode HLS audio as well as saved WAV playback and seeking.

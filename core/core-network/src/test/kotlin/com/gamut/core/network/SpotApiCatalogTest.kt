@@ -9,6 +9,17 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class SpotApiCatalogTest {
+    @Test fun artworkChoosesTheLargestSafeSource() {
+        val item = Json.parseToJsonElement("""{"coverArt":{"sources":[{"url":"https://i.scdn.co/small","width":64},{"url":"https://i.scdn.co/large","width":640},{"url":"https://evil.example/huge","width":9999},{"url":"https://i.scdn.co/medium","width":300}]}}""").jsonObject
+        assertEquals("https://i.scdn.co/large", SpotApiCatalog.artwork(item))
+    }
+    @Test fun explicitRatingsAndAllArtistIdentitiesSurviveDecode() {
+        val item = Json.parseToJsonElement("""{"data":{"searchV2":{"tracksV2":{"items":[{"uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC","name":"Song","contentRating":{"label":"EXPLICIT"},"artists":{"items":[{"uri":"spotify:artist:4tZwfgrHOc3mvqYlEYSvVi","profile":{"name":"Daft Punk"}},{"uri":"spotify:artist:2RdwBSPQiwcmiDo9kixcl8","profile":{"name":"Pharrell Williams"}}]},"duration":{"totalMilliseconds":60000}}]}}}}""").jsonObject
+        val track = SpotApiCatalog.parseTracks(item).single()
+        assertEquals(true, track.isExplicit)
+        assertEquals(listOf("Daft Punk", "Pharrell Williams"), track.artists.map { it.name })
+        assertEquals("spotify:artist:2RdwBSPQiwcmiDo9kixcl8", track.artists.last().uri)
+    }
     @Test fun decodesSpotApiSearchEnvelopes() {
         val json = """{"data":{"searchV2":{"tracksV2":{"items":[{"item":{"data":{
           "uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC","name":"Never Gonna Give You Up",

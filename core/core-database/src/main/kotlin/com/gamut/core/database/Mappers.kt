@@ -5,6 +5,7 @@ import com.gamut.core.model.ResolutionMethod
 import com.gamut.core.model.ResolvedSource
 import com.gamut.core.model.Track
 import com.gamut.core.model.TrackSource
+import com.gamut.core.model.TrackMetadata
 
 fun TrackEntity.toDomain() = Track(
     isrc = isrc,
@@ -18,6 +19,9 @@ fun TrackEntity.toDomain() = Track(
     youtubeVideoId = youtubeVideoId,
     directAudioUrl = directAudioUrl,
     albumUri = albumUri,
+    isExplicit = TrackMetadata.decode(metadata).isExplicit,
+    artists = TrackMetadata.decode(metadata).artists,
+    transcripts = TrackMetadata.decode(metadata).transcripts,
 )
 
 fun Track.toEntity() = TrackEntity(
@@ -32,6 +36,7 @@ fun Track.toEntity() = TrackEntity(
     youtubeVideoId = youtubeVideoId,
     directAudioUrl = directAudioUrl,
     albumUri = albumUri,
+    metadata = TrackMetadata(isExplicit, artists, transcripts).encode(),
 )
 
 fun ResolvedSourceEntity.toDomain() = ResolvedSource(isrc, youtubeVideoId, ResolutionMethod.valueOf(resolutionMethod), confidenceScore, verifiedCount)

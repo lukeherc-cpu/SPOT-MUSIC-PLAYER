@@ -317,6 +317,7 @@ private fun ItunesTrackDto.toDomain(): Track {
         albumArtUrl = artworkUrl100?.upscaleArtwork(),
         source = TrackSource.ITUNES,
         youtubeVideoId = null,
+        isExplicit = trackExplicitness?.let { it == "explicit" },
     )
 }
 

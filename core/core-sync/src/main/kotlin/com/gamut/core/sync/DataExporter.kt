@@ -36,6 +36,7 @@ data class ExportTrack(
     val artworkUrl: String? = null,
     val source: String? = null,
     val albumUri: String? = null,
+    val metadata: com.gamut.core.model.TrackMetadata? = null,
 )
 
 @Serializable data class ExportFavorite(val track: ExportTrack, val addedAt: Long)
@@ -391,7 +392,7 @@ class DataExporter @Inject constructor(
         return out.toByteArray()
     }
 
-    private fun Track.toExport() = ExportTrack(isrc, title, artist, album, durationMs, albumArtUrl, source.name, albumUri)
+    private fun Track.toExport() = ExportTrack(isrc, title, artist, album, durationMs, albumArtUrl, source.name, albumUri, com.gamut.core.model.TrackMetadata(isExplicit, artists, transcripts))
 
     private val ExportTrack.key get() = id.trim()
 
@@ -414,6 +415,9 @@ class DataExporter @Inject constructor(
             source = src,
             youtubeVideoId = if (yt) k.removePrefix("youtube:") else null,
             albumUri = albumUri?.takeIf { it.matches(Regex("spotify:album:[A-Za-z0-9]{22}")) },
+            isExplicit = metadata?.isExplicit,
+            artists = metadata?.artists.orEmpty().take(20).map { it.copy(name = it.name.take(200), uri = it.uri?.takeIf { uri -> uri.matches(Regex("spotify:artist:[A-Za-z0-9]{22}")) }) },
+            transcripts = metadata?.transcripts.orEmpty().take(10).filter { it.url.startsWith("https://") && it.url.length <= 2000 },
         )
     }
 
