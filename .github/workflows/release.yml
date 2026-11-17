@@ -7,6 +7,7 @@ on:
       - 'docs/**'
       - 'desktop/**'
       - '.github/workflows/desktop.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,6 +21,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Reserve the exact release source before long builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="spot-alpha-${GITHUB_RUN_NUMBER}"
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST \
+              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA"
+          fi
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
