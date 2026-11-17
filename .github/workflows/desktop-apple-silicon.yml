@@ -1,0 +1,78 @@
+name: Package Apple Silicon on available Intel Mac
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/desktop-apple-silicon.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    env:
+      RELEASE_TAG: desktop-alpha-3
+      GH_TOKEN: ${{ github.token }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/desktop-alpha-3
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Verify the same source already passed native Mac checks
+        run: |
+          RESULT=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/134234679087" --jq .conclusion)
+          test "$RESULT" = success
+          test "$(git rev-parse HEAD)" = 79582994dda86aa6b33480d5e82b18a95a305dcd
+      - name: Prepare pinned build tools
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no install-electron --no
+          npm run prepare:resolver
+      - name: Build the Apple Silicon app and installers
+        run: |
+          npm version 0.2.0-alpha.3 --no-git-tag-version --allow-same-version
+          npm run dist -- --mac --arm64
+      - name: Verify ARM64 binaries, package archive, resolver and licenses
+        run: |
+          node --input-type=module <<'JS'
+          import {readFile,stat} from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          import {createHash} from 'node:crypto';
+          import {extractFile} from '@electron/asar';
+          const base='dist/mac-arm64/Spot Music.app/Contents';
+          const root=base+'/Resources';
+          for(const file of ['app.asar','resolver/VERSION.json','licenses/Spot-Music-AGPL-3.0.txt','licenses/SpotAPI-GPL-3.0.txt'])if((await stat(root+'/'+file)).size<10)throw Error('Missing packaged resource: '+file);
+          const manifest=JSON.parse(await readFile(root+'/resolver/VERSION.json','utf8'));
+          const binary=await readFile(root+'/resolver/yt-dlp');
+          if(createHash('sha256').update(binary).digest('hex')!==manifest.sha256)throw Error('Resolver checksum mismatch');
+          for(const file of [base+'/MacOS/Spot Music',root+'/resolver/yt-dlp'])if(!execFileSync('lipo',['-archs',file],{encoding:'utf8'}).includes('arm64'))throw Error('ARM64 architecture missing');
+          const metadata=JSON.parse(extractFile(root+'/app.asar','package.json').toString());
+          if(metadata.version!=='0.2.0-alpha.3')throw Error('Wrong package version');
+          console.log('ARM64 app, universal resolver, archive version and bundled licenses verified. Native ARM64 runtime test remains queued.');
+          JS
+      - name: Upload ARM64 installers and publish the complete desktop release
+        run: |
+          node --input-type=module <<'JS'
+          import {readdir,readFile,writeFile} from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          import {createHash} from 'node:crypto';
+          const files=(await readdir('dist')).filter(x=>/-mac-arm64\.(dmg|zip)$/.test(x));
+          if(files.length!==2)throw Error('Both ARM64 installers are required');
+          const sums=[];
+          for(const file of files)sums.push(createHash('sha256').update(await readFile('dist/'+file)).digest('hex')+'  '+file);
+          const checksum='dist/SHA256SUMS-mac-arm64.txt';await writeFile(checksum,sums.join('\n')+'\n');
+          execFileSync('gh',['release','upload',process.env.RELEASE_TAG,...files.map(x=>'dist/'+x),checksum,'--clobber','--repo',process.env.GITHUB_REPOSITORY],{stdio:'inherit'});
+          const release=JSON.parse(execFileSync('gh',['release','view',process.env.RELEASE_TAG,'--repo',process.env.GITHUB_REPOSITORY,'--json','assets'],{encoding:'utf8'}));
+          for(const suffix of ['win-x64.exe','linux-x86_64.AppImage','linux-amd64.deb','mac-x64.dmg','mac-x64.zip','mac-arm64.dmg','mac-arm64.zip'])if(!release.assets.some(x=>x.name.endsWith(suffix)))throw Error('Missing platform installer: '+suffix);
+          execFileSync('gh',['release','edit',process.env.RELEASE_TAG,'--draft=false','--repo',process.env.GITHUB_REPOSITORY],{stdio:'inherit'});
+          JS

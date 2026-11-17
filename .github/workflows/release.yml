@@ -6,7 +6,7 @@ on:
       - '**/*.md'
       - 'docs/**'
       - 'desktop/**'
-      - '.github/workflows/desktop.yml'
+      - '.github/workflows/desktop*.yml'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 permissions:
