@@ -20,14 +20,18 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 data class MusicRail(val title: String, val cards: List<SpotifyCard>)
-data class SpotHome(val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val loading: Boolean = true, val error: String? = null)
+data class SpotHome(val mixes: List<DailyMix> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val loading: Boolean = true, val error: String? = null)
 data class SpotSearch(val query: String = "", val tracks: List<Track> = emptyList(), val rich: SpotifySearch = SpotifySearch(), val shows: List<PodcastShow> = emptyList(), val musicLoading: Boolean = false, val podcastLoading: Boolean = false, val notice: String? = null, val podcastError: String? = null)
 data class SpotDetail(val key: String, val title: String, val subtitle: String, val artwork: String? = null, val description: String = "", val tracks: List<Track> = emptyList(), val loading: Boolean = false, val error: String? = null, val spotify: SpotifyCollection? = null, val podcast: PodcastShow? = null, val episodes: List<PodcastEpisode> = emptyList(), val skipped: Int = 0)
 
-@OptIn(ExperimentalCoroutinesApi::class)
+data class SpotBrowse(val category: BrowseCategory, val content: BrowseContent = BrowseContent(), val shows: List<PodcastShow> = emptyList(), val loading: Boolean = true, val error: String? = null)
+
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @HiltViewModel
 class SpotViewModel @Inject constructor(
     private val catalog: SpotifyCatalog,
+    private val discovery: SpotDiscovery,
+    private val albumLookup: SpotifyAlbumLookup,
     private val trackDao: TrackDao,
     private val searchRepository: SearchRepository,
     private val library: LibraryRepository,
@@ -55,6 +59,12 @@ class SpotViewModel @Inject constructor(
     val search = _search.asStateFlow()
     private val _detail = MutableStateFlow<SpotDetail?>(null)
     val detail = _detail.asStateFlow()
+    private val _browse = MutableStateFlow<SpotBrowse?>(null)
+    val browse = _browse.asStateFlow()
+    private val detailStack = mutableListOf<SpotDetail>()
+    private var browseJob: Job? = null
+    private var homeRefreshedAt = 0L
+    private var homeNonce = 0L
     private val _opening = MutableStateFlow<Track?>(null)
     val opening = _opening.asStateFlow()
     private val _importing = MutableStateFlow(false)
@@ -67,7 +77,10 @@ class SpotViewModel @Inject constructor(
     private var playJob: Job? = null
     private val imported = mutableSetOf<String>()
     init {
-        refreshHome()
+        viewModelScope.launch {
+            combine(recents, favorites) { history, saved -> SpotDiscovery.fingerprint(history, saved) }
+                .distinctUntilChanged().debounce(800).collect { refreshHome() }
+        }
         viewModelScope.launch {
             var lastId: String? = null
             player.playbackState.collect { state ->
@@ -83,28 +96,69 @@ class SpotViewModel @Inject constructor(
         }
         viewModelScope.launch { delay(400); player.warmUp() }
     }
+    fun refreshHomeIfStale() {
+        if (System.currentTimeMillis() - homeRefreshedAt > 30 * 60_000L) refreshHome()
+    }
     fun refreshHome() {
         homeJob?.cancel()
+        homeRefreshedAt = System.currentTimeMillis()
+        val history = recents.value
+        val saved = favorites.value
+        val rotation = homeRefreshedAt / (30 * 60_000L) + homeNonce++
         homeJob = viewModelScope.launch {
             _home.update { it.copy(loading = true, error = null) }
             supervisorScope {
                 launch {
                     try {
-                        val seed = favorites.value.firstOrNull()?.artist?.takeIf { it != "Unknown artist" } ?: "indie pop"
-                        val first = catalog.searchAll(seed)
-                        val cards = (first.playlists + first.albums).distinctBy { it.uri }.take(12)
-                        _home.update { it.copy(rails = listOf(MusicRail("Picked for you", cards)), songs = first.tracks, loading = false) }
-                        val year = java.time.LocalDate.now().year
-                        val releases = catalog.searchAll("year:$year")
-                        _home.update { it.copy(rails = it.rails + MusicRail("New releases", releases.albums.take(12))) }
-                        val artists = first.artists.take(12)
-                        if (artists.isNotEmpty()) _home.update { it.copy(rails = it.rails + MusicRail("Artists to explore", artists)) }
+                        val result = discovery.recommendations(history, saved, rotation)
+                        check(result.mixes.any { it.tracks.isNotEmpty() })
+                        _home.update { it.copy(mixes = result.mixes.filter { mix -> mix.tracks.isNotEmpty() }, rails = result.rails, songs = result.songs, loading = false) }
                     } catch (e: CancellationException) { throw e }
-                    catch (_: Exception) { _home.update { it.copy(loading = false, error = "Couldn't refresh Spotify discovery. Your library is still available.") } }
+                    catch (_: Exception) { _home.update { it.copy(loading = false, error = "Couldn't refresh discovery. Your library is still available.") } }
                 }
                 launch { try { val shows = podcastRepository.search("popular"); _home.update { it.copy(shows = shows) } } catch (e: CancellationException) { throw e } catch (_: Exception) {} }
             }
         }
+    }
+    fun openBrowse(category: BrowseCategory) {
+        closeDetail()
+        _browse.value = SpotBrowse(category, SpotDiscovery.starterContent(category))
+        browseJob = viewModelScope.launch {
+            try {
+                if (category == BrowseCategory.Podcasts) {
+                    val shows = podcastRepository.search("popular")
+                    _browse.value = SpotBrowse(category, shows = shows, loading = false)
+                } else {
+                    val content = discovery.browse(category)
+                    _browse.value = SpotBrowse(category, content, loading = false)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { _browse.update { it?.copy(loading = false, error = "Couldn't load ${category.title}. Tap Retry to try again.") } }
+        }
+    }
+    fun openMix(mix: DailyMix) {
+        detailJob?.cancel()
+        pushDetail()
+        _detail.value = SpotDetail(mix.id, mix.title, "Made for you", mix.artwork, "${mix.subtitle}. Refreshed with your listening history.", mix.tracks)
+    }
+    fun openAlbum(song: Track) {
+        detailJob?.cancel()
+        pushDetail()
+        _detail.value = SpotDetail("album-for:${song.isrc}", song.album ?: song.title, song.artist, song.albumArtUrl, loading = true)
+        detailJob = viewModelScope.launch {
+            try {
+                val card = albumLookup.find(song) ?: error("Couldn't find this song's album on Spotify.")
+                val album = catalog.collection(card.uri)
+                _detail.value = SpotDetail(album.uri, album.title, album.subtitle, album.artwork, album.description, album.tracks, spotify = album)
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { _detail.update { it?.copy(loading = false, error = "Couldn't find this song's album on Spotify.") } }
+        }
+    }
+    private fun pushDetail() { _detail.value?.takeUnless { it.loading }?.let { detailStack.add(it) } }
+    fun backDetail() {
+        detailJob?.cancel()
+        if (_detail.value != null) _detail.value = detailStack.removeLastOrNull()
+        else { browseJob?.cancel(); _browse.value = null }
     }
     fun search(query: String) {
         searchJob?.cancel()
@@ -136,6 +190,7 @@ class SpotViewModel @Inject constructor(
         }
     }
     fun openCard(card: SpotifyCard) {
+        pushDetail()
         if (card.type == "show") {
             detailJob?.cancel()
             _detail.value = SpotDetail(card.uri, card.title, "Podcast", card.artwork, loading = true)
@@ -181,7 +236,7 @@ class SpotViewModel @Inject constructor(
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { _detail.update { it?.copy(loading = false, podcast = show, error = "Couldn't load this publisher's feed. Tap Retry to try again.") } }
     }
-    fun closeDetail() { detailJob?.cancel(); _detail.value = null }
+    fun closeDetail() { detailJob?.cancel(); browseJob?.cancel(); detailStack.clear(); _detail.value = null; _browse.value = null }
     fun retryDetail() { _detail.value?.let { d -> if (d.podcast != null) openShow(d.podcast, true) else if (d.key.startsWith("spotify:")) openCard(SpotifyCard(d.key, d.title, d.subtitle, d.artwork, d.key.split(':')[1])) } }
     fun play(track: Track, queue: List<Track>) {
         playJob?.cancel()

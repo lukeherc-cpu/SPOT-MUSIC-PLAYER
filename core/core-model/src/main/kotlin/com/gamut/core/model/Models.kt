@@ -17,6 +17,7 @@ data class Track(
     val source: TrackSource = TrackSource.ITUNES,
     val youtubeVideoId: String? = null,
     val directAudioUrl: String? = null,
+    val albumUri: String? = null,
 )
 
 @Serializable

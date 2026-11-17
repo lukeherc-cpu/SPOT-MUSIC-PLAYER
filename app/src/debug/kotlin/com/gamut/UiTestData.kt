@@ -3,6 +3,7 @@ package com.gamut
 import com.gamut.core.database.DownloadIndex
 import com.gamut.feature.library.LibraryRepository
 import com.gamut.podcasts.PodcastStore
+import com.gamut.core.player.MusicPlayer
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
@@ -14,4 +15,5 @@ interface UiTestData {
     fun testLibraryRepository(): LibraryRepository
     fun testDownloadIndex(): DownloadIndex
     fun testPodcastStore(): PodcastStore
+    fun testMusicPlayer(): MusicPlayer
 }

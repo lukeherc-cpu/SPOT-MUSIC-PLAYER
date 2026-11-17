@@ -97,20 +97,11 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
             }
         }
         item {
-            Slider(
+            SpotSeekBar(
                 value = dragging ?: (position.toFloat() / duration).coerceIn(0f, 1f),
-                onValueChange = { dragging = it },
-                onValueChangeFinished = { dragging?.let { vm.player.seekTo((it * duration).toLong()) }; dragging = null },
-                modifier = Modifier.fillMaxWidth().height(34.dp).padding(top = 10.dp),
-                thumb = { Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White)) },
-                track = { slider ->
-                    Canvas(Modifier.fillMaxWidth().height(3.dp)) {
-                        val start = Offset(0f, size.height / 2)
-                        val end = Offset(size.width, size.height / 2)
-                        drawLine(Color.White.copy(alpha = .25f), start, end, size.height, StrokeCap.Round)
-                        drawLine(Color.White, start, Offset(size.width * slider.value.coerceIn(0f, 1f), end.y), size.height, StrokeCap.Round)
-                    }
-                },
+                onChange = { dragging = it },
+                onFinished = { dragging?.let { vm.player.seekTo((it * duration).toLong()) }; dragging = null },
+                onCancel = { dragging = null },
             )
             Row(Modifier.fillMaxWidth()) {
                 Text(timeLabel(dragging?.let { (it * duration).toLong() } ?: position), color = Muted, style = MaterialTheme.typography.bodySmall)

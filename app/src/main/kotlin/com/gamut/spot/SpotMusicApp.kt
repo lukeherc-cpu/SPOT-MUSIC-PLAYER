@@ -35,6 +35,8 @@ import com.gamut.core.player.StreamQuality
 import com.gamut.podcasts.PodcastShow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 private enum class Page { Home, Search, Library, Create, Settings, Import }
 
@@ -44,6 +46,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     val home by vm.home.collectAsState()
     val search by vm.search.collectAsState()
     val detail by vm.detail.collectAsState()
+    val browse by vm.browse.collectAsState()
     val favorites by vm.favorites.collectAsState()
     val playlists by vm.playlists.collectAsState()
     val playlistTracks by vm.playlistTracks.collectAsState()
@@ -78,8 +81,11 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(shared) { if (shared != null) { importLink = shared!!; navigate(Page.Import); consumeLink() } }
     LaunchedEffect(detail?.key) { if (page == Page.Import && detail?.key?.toLongOrNull() != null) page = Page.Library }
-    BackHandler(fullPlayer || detail != null || page != Page.Home) {
-        when { fullPlayer -> fullPlayer = false; detail != null -> vm.closeDetail(); else -> navigate(Page.Home) }
+    LaunchedEffect(page) {
+        if (page == Page.Home) while (isActive) { vm.refreshHomeIfStale(); delay(60_000) }
+    }
+    BackHandler(fullPlayer || detail != null || browse != null || page != Page.Home) {
+        when { fullPlayer -> fullPlayer = false; detail != null || browse != null -> vm.backDetail(); else -> navigate(Page.Home) }
     }
     SpotTheme {
         Scaffold(
@@ -105,7 +111,8 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 if (fullPlayer && track != null) SpotPlayerScreen(vm, track, isPlaying, opening != null, favoriteIds, onBack = { fullPlayer = false }, onMore = { actions = it }, onSave = { vm.favorite(track) })
-                else if (detail != null) SpotCollectionScreen(detail!!, vm, favoriteIds, currentId, onBack = vm::closeDetail, onMore = { actions = it }, onImport = { importLink = detail!!.key; navigate(Page.Import) })
+                else if (detail != null) SpotCollectionScreen(detail!!, vm, favoriteIds, currentId, onBack = vm::backDetail, onMore = { actions = it }, onImport = { importLink = detail!!.key; navigate(Page.Import) })
+                else if (browse != null) SpotBrowseScreen(browse!!, home, vm, favoriteIds, currentId, onMore = { actions = it })
                 else when (page) {
                     Page.Home -> LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
                         item {
@@ -134,11 +141,12 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 } }
                             }
                         }
+                        if (homeFilter != "Podcasts") item { DailyMixRail(home.mixes, home.loading, vm::openMix, vm::refreshHome) }
                         if (homeFilter != "Music") item { PodcastRail(if (follows.isNotEmpty()) "Your shows" else "Find your next podcast", follows.ifEmpty { home.shows }.take(12), vm::openShow) }
                         if (homeFilter != "Podcasts") {
                             home.rails.forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
                             if (home.songs.isNotEmpty()) {
-                                item { SHeading("On repeat") }
+                                item { SHeading("Listen again") }
                                 items(home.songs.take(5), key = { "home-song-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { vm.play(song, home.songs) }, onMore = { actions = song }) }
                             }
                         }
@@ -155,7 +163,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         if (search.query.isBlank()) {
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                                 item { SHeading("Browse all") }
-                                item { CategoryGrid(artwork = home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct(), podcastArtwork = home.shows.firstOrNull()?.artwork, onMusic = { query -> searchFilter = "All"; vm.search(query) }, onPodcasts = { searchFilter = "Podcasts"; vm.search("popular podcasts") }) }
+                                item { CategoryGrid(artwork = home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct(), podcastArtwork = home.shows.firstOrNull()?.artwork, onCategory = vm::openBrowse) }
                                 home.rails.take(2).forEach { rail -> item { SCardRail(rail.title, rail.cards, vm::openCard) } }
                             }
                         } else {
@@ -255,6 +263,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 MenuRow(Icons.Outlined.PlaylistAdd, "Add to playlist") { addToPlaylist = song; actions = null }
                 MenuRow(Icons.Outlined.QueueMusic, "Add to queue") { vm.player.addToQueue(song); actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
+                if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 MenuRow(Icons.Outlined.Person, "Go to artist") { vm.search(song.artist); searchFilter = "Artists"; navigate(Page.Search); actions = null }
                 MenuRow(Icons.Outlined.Share, "Share") {
                     val text = if (song.source == TrackSource.SPOTIFY) "https://open.spotify.com/track/${song.isrc.removePrefix("spotify:")}" else "${song.title} — ${song.artist}"
@@ -288,11 +297,13 @@ internal fun SearchInput(query: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun CategoryGrid(artwork: List<String>, podcastArtwork: String?, onMusic: (String) -> Unit, onPodcasts: () -> Unit) {
-    val categories = listOf("Music" to 0xFFE0148C, "Podcasts" to 0xFF006450, "New releases" to 0xFFE66A20, "Charts" to 0xFF8D67AB, "Indie" to 0xFF608108, "Alternative" to 0xFFBC5900, "Pop" to 0xFF8D67AB, "Hip-Hop" to 0xFFBA5D07, "Ambient" to 0xFF477D95, "Folk & Acoustic" to 0xFFB49A6D)
+private fun CategoryGrid(artwork: List<String>, podcastArtwork: String?, onCategory: (BrowseCategory) -> Unit) {
+    val categories = BrowseCategory.entries
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         categories.chunked(2).forEachIndexed { rowIndex, pair -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            pair.forEachIndexed { columnIndex, (name, color) -> Box(Modifier.weight(1f).height(98.dp).clip(RoundedCornerShape(5.dp)).background(Color(color)).clickable { if (name == "Podcasts") onPodcasts() else onMusic(when(name) { "Music" -> "popular music"; "New releases" -> "year:${java.time.LocalDate.now().year}"; else -> name }) }.padding(12.dp)) {
+            pair.forEachIndexed { columnIndex, category ->
+                val name = category.title
+                Box(Modifier.weight(1f).height(98.dp).clip(RoundedCornerShape(5.dp)).background(Color(category.color)).clickable { onCategory(category) }.padding(12.dp)) {
                 Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(.75f))
                 val image = if (name == "Podcasts") podcastArtwork else artwork.getOrNull((rowIndex * 2 + columnIndex) % artwork.size.coerceAtLeast(1))
                 if (image != null) SArt(image, Modifier.size(68.dp).align(Alignment.BottomEnd).offset(x = 20.dp, y = 20.dp).rotate(22f))

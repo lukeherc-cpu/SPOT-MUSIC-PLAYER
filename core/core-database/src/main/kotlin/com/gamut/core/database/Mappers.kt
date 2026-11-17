@@ -17,6 +17,7 @@ fun TrackEntity.toDomain() = Track(
     source = runCatching { TrackSource.valueOf(source) }.getOrDefault(TrackSource.MUSICBRAINZ),
     youtubeVideoId = youtubeVideoId,
     directAudioUrl = directAudioUrl,
+    albumUri = albumUri,
 )
 
 fun Track.toEntity() = TrackEntity(
@@ -30,6 +31,7 @@ fun Track.toEntity() = TrackEntity(
     source = source.name,
     youtubeVideoId = youtubeVideoId,
     directAudioUrl = directAudioUrl,
+    albumUri = albumUri,
 )
 
 fun ResolvedSourceEntity.toDomain() = ResolvedSource(isrc, youtubeVideoId, ResolutionMethod.valueOf(resolutionMethod), confidenceScore, verifiedCount)

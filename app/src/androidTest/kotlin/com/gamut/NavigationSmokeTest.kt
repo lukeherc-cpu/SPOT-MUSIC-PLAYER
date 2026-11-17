@@ -12,6 +12,7 @@ import androidx.test.uiautomator.Until
 import com.gamut.core.database.DownloadEntity
 import com.gamut.core.database.DownloadIndex
 import com.gamut.core.model.Track
+import com.gamut.core.model.PlaybackState
 import com.gamut.feature.library.LibraryRepository
 import com.gamut.podcasts.*
 import dagger.hilt.android.EntryPointAccessors
@@ -20,6 +21,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -40,7 +42,7 @@ class NavigationSmokeTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val data = EntryPointAccessors.fromApplication(context, UiTestData::class.java)
         val art = "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e029b9b36b0e22870b9f542d937"
-        val first = Track("ui-reference-one", title = "First UI Song", artist = "Reference Artist", album = "Reference Album", durationMs = 60000, albumArtUrl = art)
+        val first = Track("ui-reference-one", title = "First UI Song", artist = "Reference Artist", album = "Reference Album", durationMs = 60000, albumArtUrl = art, albumUri = "spotify:album:4m2880jivSbbyEGAKfITCa")
         val second = first.copy(isrc = "ui-reference-two", title = "Second UI Song")
         val id = data.testLibraryRepository().importPlaylist("UI Reference Playlist", art, listOf(first, second, first))
         assertEquals(listOf(first.isrc, second.isrc), data.testLibraryRepository().observeTracks(id).first().map { it.isrc })
@@ -57,7 +59,8 @@ class NavigationSmokeTest {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ActivityScenario.launch(MainActivity::class.java).use {
             assertTrue("Home did not become available", device.wait(Until.hasObject(By.text("Liked Songs")), 30000))
-            device.wait(Until.hasObject(By.text("Picked for you")), 12000)
+            assertTrue(device.wait(Until.hasObject(By.text("Daily Mixes")), 5000))
+            device.wait(Until.hasObject(By.text("Daily Mix 1")), 15000)
             screenshot(device, "home")
             device.findObject(By.text("Podcasts")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Your shows")), 5000))
@@ -67,6 +70,16 @@ class NavigationSmokeTest {
             assertNotNull(device.findObject(By.text("Browse all")))
             assertNull(device.findObject(By.text("Catalog")))
             screenshot(device, "search")
+            device.findObject(By.text("Charts")).click()
+            assertTrue(device.wait(Until.hasObject(By.text("Top charts in the US")), 5000))
+            assertNull(device.findObject(By.text("What do you want to listen to?")))
+            screenshot(device, "charts")
+            device.findObject(By.text("Top 50 - USA")).click()
+            assertTrue(device.wait(Until.hasObject(By.desc("Back")), 5000))
+            device.pressBack()
+            assertTrue(device.wait(Until.hasObject(By.text("Top charts in the US")), 5000))
+            device.pressBack()
+            assertTrue(device.wait(Until.hasObject(By.text("Browse all")), 5000))
             bottom(device, "Your Library")
             assertTrue(device.wait(Until.hasObject(By.text("UI Reference Playlist")), 5000))
             assertNotNull(device.findObject(By.text("Reference Podcast")))
@@ -74,11 +87,19 @@ class NavigationSmokeTest {
             device.findObject(By.text("UI Reference Playlist")).click()
             assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
             screenshot(device, "playlist")
+            device.findObjects(By.desc("Song options")).first().click()
+            assertTrue(device.wait(Until.hasObject(By.text("Go to album")), 5000))
+            device.findObject(By.text("Go to album")).click()
+            assertTrue(device.wait(Until.hasObject(By.desc("Back")), 5000))
+            device.pressBack()
+            assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
             device.findObject(By.desc("Play collection")).click()
             assertTrue("Local saved song did not start", device.wait(Until.hasObject(By.desc("Pause")), 15000))
             device.findObjects(By.text("First UI Song")).maxBy { it.visibleBounds.bottom }.click()
             assertTrue(device.wait(Until.hasObject(By.text("PLAYING FROM YOUR MUSIC")), 5000))
             assertNotNull(device.findObject(By.desc("Close player")))
+            device.findObject(By.desc("Playback position")).click()
+            withTimeout(5000) { data.testMusicPlayer().playbackState.first { state -> state is PlaybackState.Playing && state.positionMs in 25000..40000 } }
             screenshot(device, "player")
             device.findObject(By.desc("Close player")).click()
             device.pressBack()

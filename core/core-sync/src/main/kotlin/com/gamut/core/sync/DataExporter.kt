@@ -35,6 +35,7 @@ data class ExportTrack(
     val durationMs: Long = 0,
     val artworkUrl: String? = null,
     val source: String? = null,
+    val albumUri: String? = null,
 )
 
 @Serializable data class ExportFavorite(val track: ExportTrack, val addedAt: Long)
@@ -390,7 +391,7 @@ class DataExporter @Inject constructor(
         return out.toByteArray()
     }
 
-    private fun Track.toExport() = ExportTrack(isrc, title, artist, album, durationMs, albumArtUrl, source.name)
+    private fun Track.toExport() = ExportTrack(isrc, title, artist, album, durationMs, albumArtUrl, source.name, albumUri)
 
     private val ExportTrack.key get() = id.trim()
 
@@ -412,6 +413,7 @@ class DataExporter @Inject constructor(
             albumArtUrl = artworkUrl?.takeIf { it.startsWith("https://") || (local && (it.startsWith("file:") || it.startsWith("content:"))) }?.take(500),
             source = src,
             youtubeVideoId = if (yt) k.removePrefix("youtube:") else null,
+            albumUri = albumUri?.takeIf { it.matches(Regex("spotify:album:[A-Za-z0-9]{22}")) },
         )
     }
 

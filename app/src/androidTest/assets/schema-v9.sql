@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS `tracks` (`isrc` TEXT NOT NULL, `musicBrainzId` TEXT, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `album` TEXT, `durationMs` INTEGER NOT NULL, `albumArtUrl` TEXT, `source` TEXT NOT NULL, `youtubeVideoId` TEXT, `directAudioUrl` TEXT, PRIMARY KEY(`isrc`));
+CREATE TABLE IF NOT EXISTS `resolved_sources` (`isrc` TEXT NOT NULL, `youtubeVideoId` TEXT NOT NULL, `resolutionMethod` TEXT NOT NULL, `confidenceScore` REAL NOT NULL, `verifiedCount` INTEGER NOT NULL, PRIMARY KEY(`isrc`));
+CREATE TABLE IF NOT EXISTS `playlists` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `coverUri` TEXT, `tags` TEXT NOT NULL DEFAULT '', `remoteId` TEXT);
+CREATE TABLE IF NOT EXISTS `PlaylistTrackCrossRef` (`playlistId` INTEGER NOT NULL, `isrc` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`playlistId`, `isrc`));
+CREATE INDEX IF NOT EXISTS `index_PlaylistTrackCrossRef_isrc` ON `PlaylistTrackCrossRef` (`isrc`);
+CREATE TABLE IF NOT EXISTS `downloads` (`isrc` TEXT NOT NULL, `localFilePath` TEXT NOT NULL, `downloadedAtEpochMs` INTEGER NOT NULL, `fileSizeBytes` INTEGER NOT NULL, PRIMARY KEY(`isrc`));
+CREATE TABLE IF NOT EXISTS `artwork_cache` (`releaseId` TEXT NOT NULL, `artworkUrl` TEXT NOT NULL, `cachedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`releaseId`));
+CREATE TABLE IF NOT EXISTS `favorites` (`isrc` TEXT NOT NULL, `addedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`isrc`));
+CREATE TABLE IF NOT EXISTS `pending_sync` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT NOT NULL, `itemKey` TEXT NOT NULL, `payload` TEXT, `createdAtEpochMs` INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS `index_pending_sync_type_itemKey` ON `pending_sync` (`type`, `itemKey`);
+CREATE TABLE IF NOT EXISTS `sync_state` (`name` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`name`));
+CREATE TABLE IF NOT EXISTS `recently_played` (`isrc` TEXT NOT NULL, `playedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`isrc`));
+CREATE TABLE IF NOT EXISTS `artist_follows` (`artistKey` TEXT NOT NULL, `name` TEXT NOT NULL, `imageUrl` TEXT, `followedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`artistKey`));
+CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT);
+INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ffd9a4adbb5ee855c1d5f0bfdb24db8b');

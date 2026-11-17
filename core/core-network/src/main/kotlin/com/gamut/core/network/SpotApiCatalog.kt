@@ -268,7 +268,9 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
             if (!id.matches(Regex("[A-Za-z0-9]{22}")) || track.s("name").isBlank()) return null
             val album = track.o("albumOfTrack").ifEmpty { fallbackAlbum ?: JsonObject(emptyMap()) }
             return Track("spotify:$id", title = track.s("name"), artist = artistNames(track).ifBlank { artistNames(album) }.ifBlank { "Unknown artist" },
-                album = album.s("name"), durationMs = track.o("duration").n("totalMilliseconds"), albumArtUrl = artwork(album), source = TrackSource.SPOTIFY)
+                album = album.s("name"), durationMs = track.o("duration").n("totalMilliseconds"), albumArtUrl = artwork(album), source = TrackSource.SPOTIFY,
+                albumUri = album.s("uri").takeIf { it.matches(Regex("spotify:album:[A-Za-z0-9]{22}")) }
+                    ?: album.s("id").takeIf { it.matches(Regex("[A-Za-z0-9]{22}")) }?.let { "spotify:album:$it" })
         }
         private fun artistAlbums(root: JsonObject): List<SpotifyCard> {
             val result = mutableListOf<SpotifyCard>()

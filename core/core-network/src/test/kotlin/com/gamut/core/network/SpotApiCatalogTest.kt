@@ -13,7 +13,7 @@ class SpotApiCatalogTest {
         val json = """{"data":{"searchV2":{"tracksV2":{"items":[{"item":{"data":{
           "uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC","name":"Never Gonna Give You Up",
           "artists":{"items":[{"profile":{"name":"Rick Astley"}}]},
-          "albumOfTrack":{"name":"Whenever You Need Somebody","coverArt":{"sources":[{"url":"https://i.scdn.co/image/test"}]}},
+          "albumOfTrack":{"uri":"spotify:album:4m2880jivSbbyEGAKfITCa","name":"Whenever You Need Somebody","coverArt":{"sources":[{"url":"https://i.scdn.co/image/test"}]}},
           "duration":{"totalMilliseconds":213573}
         }}}]}}}}"""
         val track = SpotApiCatalog.parseTracks(Json.parseToJsonElement(json).jsonObject).single()
@@ -21,6 +21,7 @@ class SpotApiCatalogTest {
         assertEquals("Rick Astley", track.artist)
         assertEquals(213573L, track.durationMs)
         assertEquals(TrackSource.SPOTIFY, track.source)
+        assertEquals("spotify:album:4m2880jivSbbyEGAKfITCa", track.albumUri)
         assertNull(track.directAudioUrl)
     }
     @Test fun rejectsChangedSearchEnvelopesRatherThanClaimingNoMatches() {

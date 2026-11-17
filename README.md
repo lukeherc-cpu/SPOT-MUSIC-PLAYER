@@ -4,7 +4,8 @@ Android music and podcast player built on Gamut's playback engine, with a new Sp
 
 [Download Android alpha APKs](https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER/releases) · [Source](https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER)
 
-- Home with All / Music / Podcasts filters, saved shortcuts and artwork rails.
+- Home with history-driven Daily Mixes, All / Music / Podcasts filters, saved shortcuts and artwork rails. Mixes refresh after listening changes and every 30 minutes.
+- Dedicated Music, genre, new-release and Charts browse pages. Charts opens real Spotify US/global chart collections. Song menus include Go to album; album identities persist in your library.
 - One search for songs, podcasts, Spotify albums, artists and playlists.
 - Your Library with liked songs, playlists, followed shows and downloaded music.
 - Import public Spotify playlist and album links, including every page of songs. Source order and artwork are retained; duplicate songs are stored once. Imports commit atomically. Private playlists and Liked Songs require account access and are not supported by anonymous import.

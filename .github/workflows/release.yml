@@ -5,6 +5,8 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -56,7 +58,8 @@ jobs:
             adb exec-out cat /sdcard/spot-ui-playlist.png > ui-playlist.png
             adb exec-out cat /sdcard/spot-ui-player.png > ui-player.png
             adb exec-out cat /sdcard/spot-ui-import.png > ui-import.png
-            python3 -c "from pathlib import Path; files=list(Path('.').glob('ui-*.png')); assert len(files)==7; assert all(p.read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a')) and p.stat().st_size > 1000 for p in files)"
+            adb exec-out cat /sdcard/spot-ui-charts.png > ui-charts.png
+            python3 -c "from pathlib import Path; files=list(Path('.').glob('ui-*.png')); assert len(files)==8; assert all(p.read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a')) and p.stat().st_size > 1000 for p in files)"
       - name: Test and build
         run: |
           bash ./gradlew --no-daemon testDebugUnitTest --console=plain
@@ -73,6 +76,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           Android alpha of Spot Music, based on Gamut, with Spotify catalog discovery adapted from Aran404/SpotAPI.
 
+          - Dedicated Music, genre, new-release and real US/global chart pages.
+          - History-driven Daily Mixes, automatic recommendation refresh and Go to album in song menus.
+          - Aligned seek thumb and a library-preserving album-link database upgrade.
           - Entirely new Home, Search, Your Library, Create, collection, podcast, settings and player screens.
           - Spotify-style flat dark layout, artwork rails, genre tiles and compact now-playing bar.
           - SpotAPI-powered Spotify albums, artists and playlists. Public playlist and album import with pagination and atomic local saves.
@@ -85,6 +91,6 @@ jobs:
 
           Install Spot-Music-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and the previous Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
           NOTES
-          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png \
+          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
             --title "Spot Music Android alpha ${GITHUB_RUN_NUMBER}" --notes-file release-notes.md

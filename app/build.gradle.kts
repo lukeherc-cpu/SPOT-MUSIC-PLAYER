@@ -138,6 +138,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
 dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation(libs.androidx.room.runtime)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.uiautomator)
 }
