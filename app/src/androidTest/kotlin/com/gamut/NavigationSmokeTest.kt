@@ -133,6 +133,11 @@ class NavigationSmokeTest {
             device.findObject(By.desc("Close player")).click()
             device.pressBack()
             bottom(device, "Your Library")
+            // The upgrade fixture and save-sheet target can push the footer below the
+            // viewport. Use the library's always-visible import menu entry.
+            assertTrue(device.wait(Until.hasObject(By.desc("Create or import")), 5000))
+            device.findObject(By.desc("Create or import")).click()
+            assertTrue(device.wait(Until.hasObject(By.text("Import from Spotify")), 5000))
             device.findObject(By.text("Import from Spotify")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Bring your music with you")), 5000))
             assertNotNull(device.findObject(By.text("Spotify link")))

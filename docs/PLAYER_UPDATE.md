@@ -21,7 +21,7 @@ Android verifies package identity, version code and signing identity when updati
 | Local APK from this chat | `c9ae87a69f11c3e4852f64aaac4c32d7bb2891b09fc1883ea2d378314576a0e0` |
 | GitHub Releases | `bab3f8d16bf11feee9b15791faac0909e1e9840b27fb79bf21e07a22e3fdce4b` |
 
-Use the same channel as the installed APK. Both identities are retained; they cannot be exchanged by an ordinary APK update. Settings now shows the installed update channel. Alpha 10 has version code 10010 and the same package `com.lukeherc.spotmusic`. The release workflow refuses publication if the GitHub signing certificate changes. Its emulator check installs an alpha-8-source APK, seeds a real v10 library, uses `adb install -r` for the new build and verifies preserved favorites, playlist order, files and preferences.
+Use the same channel as the installed APK. Both identities are retained; they cannot be exchanged by an ordinary APK update. Settings now shows the installed update channel. Alpha 11 has version code 10011 and the same package `com.lukeherc.spotmusic`. The release workflow refuses publication if the GitHub signing certificate changes. Its emulator check installs an alpha-8-source APK, seeds a real v10 library, uses `adb install -r` for the new build and verifies preserved favorites, playlist order, files and preferences.
 
 On Android 8–12 the app selects its bundled yt-dlp resolver because NewPipe 0.27 references a java.net API introduced in Android 13. Optional extractor linkage errors also fall back without terminating playback or background preparation.
 
