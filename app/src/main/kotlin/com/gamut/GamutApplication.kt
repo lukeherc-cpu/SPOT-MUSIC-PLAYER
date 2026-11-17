@@ -9,6 +9,7 @@ import com.gamut.account.ProfileStore
 import com.gamut.core.database.DownloadIndex
 import com.gamut.core.player.MusicPlayer
 import com.gamut.core.sync.SyncManager
+import com.gamut.feature.library.localUri
 import com.gamut.feature.resolver.AndroidYtDlpEngine
 import com.gamut.feature.resolver.AudioSourceRepository
 import com.gamut.feature.resolver.ResolveTrackSourceUseCase
@@ -43,16 +44,21 @@ class GamutApplication :
 
     @Inject lateinit var profileStore: ProfileStore
 
+    @Inject lateinit var podcastStore: com.gamut.podcasts.PodcastStore
+
     @Inject lateinit var shazamSession: ShazamSession
 
     override fun onCreate() {
         super.onCreate()
+        podcastStore.observe(player, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
         player.setSourceResolver { track, forceRefresh, onProgress ->
+            track.localUri()?.let { return@setSourceResolver it.toString() }
             if (!forceRefresh) {
                 downloadIndex.pathFor(track.isrc)?.let(::File)?.takeIf { it.exists() }?.let {
                     return@setSourceResolver Uri.fromFile(it).toString()
                 }
             }
+            track.directAudioUrl?.takeIf { track.source == com.gamut.core.model.TrackSource.PODCAST }?.let { return@setSourceResolver it }
             val source = resolveTrackSource(track).getOrNull() ?: return@setSourceResolver null
             onProgress(0.5f)
             audioSources.audioUrl(source.youtubeVideoId, forceRefresh).getOrNull()

@@ -1121,7 +1121,7 @@ class Media3MusicPlayer @Inject constructor(
         const val RESOLVE_START = 0.05f
         const val RESOLVE_END = 0.7f
 
-        const val BUFFER_FOR_PLAYBACK_MS = 1_500
+        const val BUFFER_FOR_PLAYBACK_MS = 500
 
         const val CACHE_MAX_BYTES = 200L * 1024 * 1024
 

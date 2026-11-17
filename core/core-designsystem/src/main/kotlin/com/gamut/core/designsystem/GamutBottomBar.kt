@@ -44,7 +44,7 @@ fun GamutBottomBar(
     nowPlaying: @Composable () -> Unit = {},
 ) {
     val hairline = ink(0.08f)
-    Column(modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
         nowPlaying()
         Column(
             Modifier
@@ -71,7 +71,7 @@ fun GamutBottomBar(
 
 @Composable
 private fun BottomBarTab(item: BottomBarItem, modifier: Modifier) {
-    val tint by animateColorAsState(if (item.selected) ink() else ink(0.45f), tween(200), label = "bar-tint")
+    val tint by animateColorAsState(if (item.selected) ink() else ink(0.65f), tween(200), label = "bar-tint")
     val marker by animateFloatAsState(if (item.selected) 1f else 0f, tween(200), label = "bar-marker")
     Box(
         modifier
@@ -87,7 +87,7 @@ private fun BottomBarTab(item: BottomBarItem, modifier: Modifier) {
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(item.icon, null, tint = tint, modifier = Modifier.size(21.dp))
             Spacer(Modifier.height(2.dp))
-            Text(item.label, color = tint, style = MaterialTheme.typography.labelMedium, fontSize = 10.5.sp)
+            Text(item.label, color = tint, style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
         }
     }
 }

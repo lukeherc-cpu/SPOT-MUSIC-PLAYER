@@ -40,16 +40,19 @@ interface AudioSourceRepository {
 
 @Singleton
 class AudioSourceRepositoryImpl @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
     private val engine: AndroidYtDlpEngine,
     private val newPipe: NewPipeYoutubeSource,
     private val settings: PlaybackSettings,
     @ApplicationScope private val appScope: CoroutineScope,
 ) : AudioSourceRepository {
+    private val saved = SavedAudioUrls(java.io.File(context.noBackupFilesDir, "saved-audio-urls.json"))
     private val cache = java.util.concurrent.ConcurrentHashMap<String, CachedAudio>()
     private val inFlight = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<String>>>()
 
     override fun clearCache() {
         cache.clear()
+        saved.clear()
         engine.forgetAll()
     }
 
@@ -59,10 +62,14 @@ class AudioSourceRepositoryImpl @Inject constructor(
         if (forceRefresh) {
             cache.keys.removeIf { it.startsWith("$videoId|") }
             inFlight.keys.removeIf { it.startsWith("$videoId|") }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saved.forget(videoId) }
             engine.forget(videoId)
         }
         cache[key]?.takeIf { it.expiresAtMs > System.currentTimeMillis() }?.let {
             return Result.success(it.url)
+        }
+        if (!forceRefresh) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saved.get(key) }?.let {
+            return Result.success(it)
         }
         val job = inFlight.computeIfAbsent(key) {
             appScope.async {
@@ -73,7 +80,10 @@ class AudioSourceRepositoryImpl @Inject constructor(
                             onFailure = { engine.audioUrl(videoId, q) },
                         )
                         ?: engine.audioUrl(videoId, q)
-                    result.onSuccess { url -> cache[key] = CachedAudio(url, expiryOf(url)) }
+                    result.onSuccess { url ->
+                        cache[key] = CachedAudio(url, expiryOf(url))
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saved.put(key, url) }
+                    }
                     result
                 } catch (e: CancellationException) {
                     throw e
@@ -86,9 +96,7 @@ class AudioSourceRepositoryImpl @Inject constructor(
         return job.await()
     }
 
-    private fun expiryOf(url: String): Long = Regex("[?&]expire=(\\d+)").find(url)?.groupValues?.get(1)
-        ?.toLongOrNull()?.times(1_000L)?.minus(120_000L)
-        ?: System.currentTimeMillis() + 20 * 60_000L
+    private fun expiryOf(url: String): Long = SavedAudioUrls.expiryOf(url, System.currentTimeMillis())
 
     private data class CachedAudio(val url: String, val expiresAtMs: Long)
 
@@ -114,6 +122,14 @@ class ResolveTrackSourceUseCase @Inject constructor(
     private suspend fun resolveOrThrow(track: Track): ResolvedSource {
         val resolutionKey = track.resolutionKey()
         sources.getLocal(resolutionKey)?.let { return it }
+        val youtubeVideoId = track.youtubeVideoId
+        if (track.source != TrackSource.PODCAST && youtubeVideoId != null && com.gamut.core.network.isValidYoutubeVideoId(youtubeVideoId)) {
+            val direct = ResolvedSource(resolutionKey, youtubeVideoId, if (track.source == TrackSource.YOUTUBE) ResolutionMethod.DIRECT else ResolutionMethod.HARD_FILTER, 1.0f, 0)
+            sources.saveLocal(direct)
+            appScope.launch { sources.submitRemote(direct) }
+            return direct
+        }
+
         val remote = try {
             withTimeoutOrNull(REMOTE_LOOKUP_TIMEOUT_MS) { sources.getRemote(resolutionKey) }
         } catch (e: CancellationException) {
@@ -126,13 +142,6 @@ class ResolveTrackSourceUseCase @Inject constructor(
             return it
         }
 
-        val youtubeVideoId = track.youtubeVideoId
-        if (track.source == TrackSource.YOUTUBE && !youtubeVideoId.isNullOrBlank()) {
-            val direct = ResolvedSource(resolutionKey, youtubeVideoId, ResolutionMethod.DIRECT, 1.0f, 0)
-            sources.saveLocal(direct)
-            appScope.launch { sources.submitRemote(direct) }
-            return direct
-        }
 
         val songs = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { candidates.songs(track) }
             ?: throw ResolveFailure.Timeout("songs search")

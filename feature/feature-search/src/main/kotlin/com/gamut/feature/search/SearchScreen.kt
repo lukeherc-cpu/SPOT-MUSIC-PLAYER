@@ -50,6 +50,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -158,13 +159,13 @@ internal val TextTertiary: Color
     get() = ink(0.4f)
 
 private val PanelShape = RoundedCornerShape(16.dp)
-internal val CardShapeLarge = RoundedCornerShape(22.dp)
+internal val CardShapeLarge = RoundedCornerShape(8.dp)
 internal val RowShape = RoundedCornerShape(16.dp)
-internal val ThumbShape = RoundedCornerShape(10.dp)
+internal val ThumbShape = RoundedCornerShape(6.dp)
 
 private const val FILTER_ALL = 0
-private const val FILTER_CATALOG = 1
-private const val FILTER_YOUTUBE = 2
+private const val FILTER_MUSIC = 1
+private const val FILTER_PODCASTS = 2
 
 @Composable
 fun SearchScreen(
@@ -189,6 +190,14 @@ fun SearchScreen(
     onAddToPlaylist: (Track, String) -> Unit = { _, _ -> },
     barHeight: Dp,
     focusSearchTick: Int = 0,
+    homeMode: Boolean = false,
+    onOpenPodcasts: () -> Unit = {},
+    onPodcastQuery: (String) -> Unit = {},
+    podcastResults: List<PodcastSearchItem> = emptyList(),
+    podcastsLoading: Boolean = false,
+    podcastError: String? = null,
+    onPodcastSelected: (String) -> Unit = {},
+    homeShortcuts: List<HomeShortcut> = emptyList(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val discover by viewModel.discover.collectAsStateWithLifecycle()
@@ -225,7 +234,7 @@ fun SearchScreen(
         val showingRecents = showingDiscover && fieldFocused && recentList.isNotEmpty()
 
         LaunchedEffect(focusSearchTick) {
-            if (focusSearchTick > 0) {
+            if (!homeMode && focusSearchTick > 0) {
                 delay(280)
                 listState.scrollToItem(0)
                 runCatching { searchFocus.requestFocus() }
@@ -235,7 +244,7 @@ fun SearchScreen(
         LaunchedEffect(listState) {
             snapshotFlow { listState.isScrollInProgress }.collect { if (it) keyboard?.hide() }
         }
-        LaunchedEffect(state.query) { filter = FILTER_ALL }
+        LaunchedEffect(state.query) { onPodcastQuery(state.query) }
 
         var settled by remember { mutableStateOf(false) }
         LaunchedEffect(state.query, state.isLoading, state.tracks.isEmpty()) {
@@ -247,11 +256,10 @@ fun SearchScreen(
         }
 
         val hasYoutube = state.tracks.any { it.source == TrackSource.YOUTUBE }
-        val activeFilter = if (hasYoutube) filter else FILTER_ALL
+        val activeFilter = filter
         val visibleTracks = remember(state.tracks, activeFilter) {
             when (activeFilter) {
-                FILTER_CATALOG -> state.tracks.filter { it.source != TrackSource.YOUTUBE }
-                FILTER_YOUTUBE -> state.tracks.filter { it.source == TrackSource.YOUTUBE }
+                FILTER_PODCASTS -> emptyList()
                 else -> state.tracks
             }
         }
@@ -265,8 +273,19 @@ fun SearchScreen(
         val header: @Composable (Modifier) -> Unit = { m ->
             Column(m.fillMaxWidth().onSizeChanged { headerHeightPx = it.height }.statusBarsPadding()) {
                 Row(Modifier.fillMaxWidth().padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(44.dp).then(profileModifier).pressScale(onClick = onProfile).semantics { contentDescription = "Profile" }, contentAlignment = Alignment.Center) {
+                        ProfileAvatar(
+                            name = profileName,
+                            seed = profileSeed,
+                            size = 34.dp,
+                            guestIcon = PhosphorIcons.Bold.User,
+                            image = profileImage,
+                            invertedGuest = true,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
                     Text(
-                        "Discover",
+                        if (homeMode) "Home" else "Search",
                         style = MaterialTheme.typography.displayLarge,
                         color = TextPrimary,
                         modifier = Modifier.weight(1f),
@@ -290,19 +309,14 @@ fun SearchScreen(
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    Box(Modifier.size(44.dp).then(profileModifier).pressScale(onClick = onProfile).semantics { contentDescription = "Profile" }, contentAlignment = Alignment.Center) {
-                        ProfileAvatar(
-                            name = profileName,
-                            seed = profileSeed,
-                            size = 34.dp,
-                            guestIcon = PhosphorIcons.Bold.User,
-                            image = profileImage,
-                            invertedGuest = true,
-                        )
-                    }
+
                 }
                 Spacer(Modifier.height(20.dp))
-                SearchField(
+                if (homeMode) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("All", filter == FILTER_ALL) { filter = FILTER_ALL }
+                    Pill("Music", filter == FILTER_MUSIC) { filter = FILTER_MUSIC }
+                    Pill("Podcasts", false, onOpenPodcasts)
+                } else SearchField(
                     query = state.query,
                     onQueryChange = viewModel::updateQuery,
                     accent = accent,
@@ -359,9 +373,9 @@ fun SearchScreen(
                     }
                 }
                 Column(Modifier.fillMaxSize()) {
-                    header(Modifier.padding(horizontal = gutter + 24.dp))
+                    header(Modifier.padding(horizontal = gutter + 16.dp))
 
-                    if (wide && showingDiscover && !showingRecents) {
+                    if (wide && homeMode && showingDiscover && !showingRecents) {
                         Row(
                             Modifier.weight(1f).fillMaxWidth().padding(horizontal = gutter)
                                 .offset { IntOffset(0, refresh.pull.coerceAtLeast(0f).roundToInt()) },
@@ -411,6 +425,9 @@ fun SearchScreen(
                             modifier = Modifier.weight(1f).fillMaxWidth().offset { IntOffset(0, refresh.pull.coerceAtLeast(0f).roundToInt()) },
                             contentPadding = PaddingValues(start = gutter, end = gutter, bottom = stripHeight + 32.dp),
                         ) {
+                            if (showingDiscover && !homeMode) {
+                                item("browse") { BrowseCategories(onMusic = { viewModel.updateQuery("Popular music") }, onPodcasts = onOpenPodcasts) }
+                            }
                             if (showingRecents) {
                                 item(key = "recents-head") {
                                     Row(
@@ -443,6 +460,7 @@ fun SearchScreen(
                                     }
                                 }
                             } else if (showingDiscover) {
+                                if (homeMode && homeShortcuts.isNotEmpty()) item("home-shortcuts") { HomeShortcutGrid(homeShortcuts.filter { filter != FILTER_MUSIC || !it.podcast }) }
                                 discoverItems(
                                     state = discover,
                                     selectedTab = discoverTab,
@@ -462,10 +480,10 @@ fun SearchScreen(
                                     onLoadMore = { viewModel.loadMoreFeed() },
                                 )
                             } else {
-                                val loadingEmpty = state.tracks.isEmpty() && (state.isLoading || !settled)
-                                val noResults = state.tracks.isEmpty() && !loadingEmpty
+                                val loadingEmpty = activeFilter != FILTER_PODCASTS && visibleTracks.isEmpty() && (state.isLoading || !settled)
+                                val noResults = visibleTracks.isEmpty() && !loadingEmpty && (activeFilter == FILTER_MUSIC || (podcastResults.isEmpty() && !podcastsLoading))
 
-                                artistHit?.let { hit ->
+                                artistHit?.takeIf { activeFilter != FILTER_PODCASTS }?.let { hit ->
                                     item(key = "artist-hit") {
                                         val visible = remember { MutableTransitionState(false).apply { targetState = true } }
                                         AnimatedVisibility(
@@ -483,20 +501,28 @@ fun SearchScreen(
                                     }
                                 }
 
-                                if (hasYoutube) {
+                                if (state.query.isNotBlank()) {
                                     item(key = "filters") {
                                         Row(
                                             Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
                                             Pill("All", activeFilter == FILTER_ALL) { filter = FILTER_ALL }
-                                            Pill("Catalog", activeFilter == FILTER_CATALOG) { filter = FILTER_CATALOG }
-                                            Pill("YouTube", activeFilter == FILTER_YOUTUBE) { filter = FILTER_YOUTUBE }
+                                            Pill("Music", activeFilter == FILTER_MUSIC) { filter = FILTER_MUSIC }
+                                            Pill("Podcasts", activeFilter == FILTER_PODCASTS) { filter = FILTER_PODCASTS }
                                         }
                                     }
                                 }
 
-                                if (state.tracks.isNotEmpty()) {
+                                if (activeFilter != FILTER_MUSIC) {
+                                    if (podcastResults.isNotEmpty()) item("podcast-title") { SectionLabel("Podcasts", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+                                    val shows = if (activeFilter == FILTER_ALL) podcastResults.take(3) else podcastResults
+                                    items(shows, key = { "podcast-${it.id}" }) { podcast -> PodcastSearchRow(podcast) { onPodcastSelected(podcast.id) } }
+                                    if (podcastsLoading) item("podcast-loading") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp)) }
+                                    if (podcastError != null) item("podcast-error") { Text(podcastError, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+                                    if (activeFilter == FILTER_ALL && podcastResults.size > 3) item("podcast-more") { Text("See all podcasts", color = accent, modifier = Modifier.clickable { filter = FILTER_PODCASTS }.padding(16.dp)) }
+                                }
+                                if (visibleTracks.isNotEmpty()) {
                                     item(key = "results-title") {
                                         Row(
                                             Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 6.dp),
@@ -626,14 +652,14 @@ private fun SearchField(
                 .weight(1f)
                 .height(52.dp)
                 .then(if (remote && !editing && !focused) Modifier.pressScale(onClick = { editing = true }, scaleDown = 0.99f) else Modifier)
-                .glass(PanelShape, fill = 0.07f + 0.03f * focus, borderColor = accent.copy(alpha = 0.55f * focus))
+                .clip(RoundedCornerShape(6.dp)).background(Color.White)
                 .padding(start = 16.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 PhosphorIcons.Bold.MagnifyingGlass,
                 null,
-                tint = ink(0.45f + 0.35f * focus),
+                tint = Color(0xFF202020),
                 modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.width(12.dp))
@@ -650,7 +676,7 @@ private fun SearchField(
                         onFocusChange(it.isFocused)
                     },
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = TextPrimary),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF121212)),
                 cursorBrush = SolidColor(accent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = {
@@ -660,7 +686,7 @@ private fun SearchField(
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
-                            Text("Artists, songs, albums", style = MaterialTheme.typography.bodyLarge, color = TextTertiary)
+                            Text("What do you want to listen to?", style = MaterialTheme.typography.bodyLarge, color = Color(0xFF535353))
                         }
                         inner()
                     }
@@ -671,8 +697,8 @@ private fun SearchField(
                     Modifier.size(40.dp).pressScale(onClick = { onQueryChange("") }, scaleDown = 0.88f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(Modifier.size(22.dp).background(ink(0.14f), CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(PhosphorIcons.Bold.X, "Clear", tint = ink(0.8f), modifier = Modifier.size(13.dp))
+                    Box(Modifier.size(22.dp).background(Color(0xFFE0E0E0), CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(PhosphorIcons.Bold.X, "Clear", tint = Color(0xFF121212), modifier = Modifier.size(13.dp))
                     }
                 }
             }
@@ -711,8 +737,8 @@ internal fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 internal fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
-    val fill by animateColorAsState(ink(if (selected) 0.16f else 0.06f), tween(200), label = "pill-fill")
-    val text by animateColorAsState(ink(if (selected) 1f else 0.6f), tween(200), label = "pill-text")
+    val fill by animateColorAsState(if (selected) Color(0xFF1ED760) else ink(0.10f), tween(200), label = "pill-fill")
+    val text by animateColorAsState(if (selected) Color.Black else ink(), tween(200), label = "pill-text")
     Box(
         Modifier
             .pressScale(onClick = onClick, scaleDown = 0.94f)

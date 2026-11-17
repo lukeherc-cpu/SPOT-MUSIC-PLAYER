@@ -11,6 +11,8 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -43,14 +45,16 @@ val GamutCard = Color(0xFFFFFFFF)
 val GamutHairline = Color(0xFFE9E7EC)
 val GamutShadow = Color(0x1F1B1B1F)
 
-val GamutAccentA = Color(0xFF8E8CF0)
+val GamutAccentA = Color(0xFF1ED760)
 val GamutAccentB = Color(0xFF6FC8E8)
 val GamutAccentC = Color(0xFFB8A6F5)
 
 private val GamutColors = lightColorScheme(
     primary = GamutAccentA,
-    onPrimary = Color.White,
+    onPrimary = Color.Black,
     secondary = GamutAccentB,
+    secondaryContainer = GamutAccentA,
+    onSecondaryContainer = Color.Black,
     background = GamutPaper,
     surface = GamutCard,
     onBackground = GamutInk,
@@ -59,8 +63,8 @@ private val GamutColors = lightColorScheme(
 )
 
 val GamutDisplayFont = FontFamily(
-    Font(R.font.codenext_extrabold, FontWeight.ExtraBold, FontStyle.Normal),
-    Font(R.font.codenext_extrabolditalic, FontWeight.ExtraBold, FontStyle.Italic),
+    Font(R.font.inter_semibold, FontWeight.ExtraBold, FontStyle.Normal),
+    Font(R.font.inter_semibold, FontWeight.ExtraBold, FontStyle.Italic),
 )
 
 private val GamutBodyFont = FontFamily(
@@ -85,10 +89,12 @@ private val GamutTypography = Typography().run {
 
 private val GamutDarkColors = darkColorScheme(
     primary = GamutAccentA,
-    onPrimary = Color.White,
+    onPrimary = Color.Black,
     secondary = GamutAccentB,
-    background = Color(0xFF0B0B0D),
-    surface = Color(0xFF16161A),
+    secondaryContainer = GamutAccentA,
+    onSecondaryContainer = Color.Black,
+    background = Color(0xFF121212),
+    surface = Color(0xFF181818),
     onBackground = Color(0xFFF2F2F5),
     onSurface = Color(0xFFF2F2F5),
     error = Color(0xFFFF7A8E),
@@ -96,18 +102,21 @@ private val GamutDarkColors = darkColorScheme(
 
 @Composable
 fun GamutTheme(dark: Boolean = false, content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) GamutDarkColors else GamutColors, typography = GamutTypography, content = content)
+    val scheme = if (dark) GamutDarkColors else GamutColors
+    MaterialTheme(colorScheme = scheme, typography = GamutTypography) {
+        CompositionLocalProvider(LocalContentColor provides scheme.onBackground, content = content)
+    }
 }
 
 @Composable
 fun GamutBackdrop(content: @Composable BoxScope.() -> Unit) {
-    Box(modifier = Modifier.background(GamutPaper), content = content)
+    Box(modifier = Modifier.background(MaterialTheme.colorScheme.background), content = content)
 }
 
 val CardShape = RoundedCornerShape(18.dp)
 val PillShape = RoundedCornerShape(50)
-val ArtworkShape = RoundedCornerShape(16.dp)
-val ArtworkShapeLarge = RoundedCornerShape(24.dp)
+val ArtworkShape = RoundedCornerShape(6.dp)
+val ArtworkShapeLarge = RoundedCornerShape(8.dp)
 
 fun Modifier.hairlineBorder(shape: Shape = CardShape, color: Color = GamutHairline): Modifier = this.border(width = 1.dp, color = color, shape = shape)
 

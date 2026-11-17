@@ -3,7 +3,7 @@ package com.gamut.core.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class TrackSource { MUSICBRAINZ, ITUNES, YOUTUBE }
+enum class TrackSource { MUSICBRAINZ, ITUNES, YOUTUBE, SPOTIFY, PODCAST }
 
 @Serializable
 data class Track(
@@ -16,6 +16,7 @@ data class Track(
     val albumArtUrl: String? = null,
     val source: TrackSource = TrackSource.ITUNES,
     val youtubeVideoId: String? = null,
+    val directAudioUrl: String? = null,
 )
 
 @Serializable

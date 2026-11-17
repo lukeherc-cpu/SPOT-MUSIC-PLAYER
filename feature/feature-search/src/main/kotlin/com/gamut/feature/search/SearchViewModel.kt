@@ -189,10 +189,10 @@ class SearchViewModel @Inject constructor(
                     it.copy(
                         tracks = tracks,
                         isLoading = stillSearching && !result.isFinal,
-                        error = if (failed && stillSearching) "Search failed. Check your connection and try again." else null,
+                        error = if (failed && stillSearching) "Search failed. Check your connection and try again." else result.catalogNotice,
                     )
                 }
-                if (result.isFinal && stillSearching && tracks.isNotEmpty()) {
+                if (stillSearching && tracks.isNotEmpty()) {
                     prefetch.prefetch(tracks.take(PREFETCH_LIMIT))
                 }
             }

@@ -244,7 +244,7 @@ private fun WelcomeCopy(headlineSize: TextUnit, centered: Boolean, compactCopy: 
 
     Column(horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start) {
         Text(
-            "Music without limits.",
+            "Your music.\nYour podcasts.",
             style = MaterialTheme.typography.displaySmall.copy(
                 fontFamily = GamutDisplayFont,
                 fontSize = headlineSize,
@@ -258,7 +258,7 @@ private fun WelcomeCopy(headlineSize: TextUnit, centered: Boolean, compactCopy: 
         )
         if (!compactCopy) {
             Text(
-                "Stream, download and sync across all your devices. Free and open source.",
+                "Discover music with Spotify catalog search. Stream music and podcasts, no account needed.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = ink(0.6f),
                 textAlign = align,

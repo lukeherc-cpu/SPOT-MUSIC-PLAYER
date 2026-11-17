@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -265,7 +266,7 @@ fun PlayerScreen(
     val lyricsSeconds = (effectiveDurationMs / 1000).toInt()
     LaunchedEffect(lyricsKey, lyricsRetry, lyricsOn, lyricsSeconds, active) {
         val t = track ?: return@LaunchedEffect
-        if (!lyricsOn || !active) return@LaunchedEffect
+        if (!lyricsOn || !active || t.source == com.gamut.core.model.TrackSource.PODCAST) return@LaunchedEffect
         val shown = lyricsState
         if (shown is LyricsState.Loaded && (shown.isSynced || lyricsTriedSeconds == lyricsSeconds)) return@LaunchedEffect
         if (shown !is LyricsState.Loaded) lyricsState = LyricsState.Loading
@@ -290,7 +291,7 @@ fun PlayerScreen(
     var artistLoading by remember(lyricsKey) { mutableStateOf(artistInfo == null) }
     LaunchedEffect(lyricsKey, active) {
         val t = track ?: return@LaunchedEffect
-        if (!active) return@LaunchedEffect
+        if (!active || t.source == com.gamut.core.model.TrackSource.PODCAST) return@LaunchedEffect
         if (artistInfo != null) {
             artistLoading = false
             return@LaunchedEffect
@@ -400,6 +401,12 @@ fun PlayerScreen(
 
                 Spacer(Modifier.height(10.dp))
                 TimeRow(positionProvider, effectiveDurationMs)
+                if (track?.source == com.gamut.core.model.TrackSource.PODCAST) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        androidx.compose.material3.TextButton(onClick = { player.seekTo((player.currentPositionMs() - 15_000).coerceAtLeast(0)) }) { Text("Back 15 sec") }
+                        androidx.compose.material3.TextButton(onClick = { player.seekTo((player.currentPositionMs() + 15_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) { Text("Forward 15 sec") }
+                    }
+                }
 
                 if (lyricsOn) CurrentLyricLine(shownLyrics, activeIndex, lyricsPosition, tint, highlight = lyricHighlight)
 

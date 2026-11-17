@@ -12,15 +12,15 @@ enum class AppearanceLevel { Low, Medium, High }
 
 @Immutable
 data class AppearanceSettings(
-    val mode: AppThemeMode = AppThemeMode.Auto,
-    val adaptive: Boolean = true,
+    val mode: AppThemeMode = AppThemeMode.Dark,
+    val adaptive: Boolean = false,
     val preset: String = "graphite",
     val flowStyle: FlowStyle = FlowStyle.Flow,
-    val flowAnimated: Boolean = true,
+    val flowAnimated: Boolean = false,
     val flowIntensity: AppearanceLevel = AppearanceLevel.Medium,
     val flowSpeed: AppearanceLevel = AppearanceLevel.Medium,
     val freezeWhenPaused: Boolean = false,
-    val glass: Boolean = true,
+    val glass: Boolean = false,
     val glassDensity: AppearanceLevel = AppearanceLevel.Medium,
 ) {
     val effectiveMode: AppThemeMode get() = if (mode == AppThemeMode.Auto && !adaptive) AppThemeMode.System else mode
@@ -88,7 +88,7 @@ private fun preset(id: String, name: String, darkBase: Long, darkAccent: Long, l
 
 object AppColorPresets {
     val all = listOf(
-        preset("graphite", "Graphite", 0xFF0B0B0D, 0xFFFFFFFF, 0xFFF4F4F6, 0xFF141414),
+        preset("graphite", "Graphite", 0xFF121212, 0xFF1ED760, 0xFFF4F4F6, 0xFF141414),
         preset("rose", "Rose", 0xFF1E1016, 0xFFFF8FB1, 0xFFFFF1F5, 0xFFC2185B),
         preset("ocean", "Ocean", 0xFF0D1620, 0xFF7DB9FF, 0xFFEFF6FF, 0xFF1565C0),
         preset("forest", "Forest", 0xFF0E1A14, 0xFF6FD6A0, 0xFFF0F9F3, 0xFF2E7D4F),

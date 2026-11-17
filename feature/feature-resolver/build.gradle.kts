@@ -10,3 +10,8 @@ dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(libs.androidx.work.runtime); implementation(libs.retrofit.core); implementation(libs.youtubedl.android); implementation(libs.newpipe.extractor); implementation(libs.okhttp.logging); implementation(libs.kotlinx.serialization.json); implementation(libs.hilt.android); ksp(libs.hilt.compiler)
 }
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+}

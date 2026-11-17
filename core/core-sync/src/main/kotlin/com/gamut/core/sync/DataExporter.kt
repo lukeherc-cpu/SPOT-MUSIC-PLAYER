@@ -397,11 +397,12 @@ class DataExporter @Inject constructor(
     private fun ExportTrack.toTrackOrNull(): Track? {
         val k = key
         val local = LOCAL_ID.matches(k)
-        if (parseIsrc(k) == null && !BARE_ISRC.matches(k) && !local) return null
+        val spotify = Regex("^spotify:[A-Za-z0-9]{22}$").matches(k)
+        if (parseIsrc(k) == null && !BARE_ISRC.matches(k) && !local && !spotify) return null
         val yt = k.startsWith("youtube:")
         val known = TrackSource.entries.firstOrNull { it.name == source && it != TrackSource.YOUTUBE }
         if (local && known == null) return null
-        val src = if (yt) TrackSource.YOUTUBE else known ?: TrackSource.ITUNES
+        val src = when { yt -> TrackSource.YOUTUBE; spotify -> TrackSource.SPOTIFY; else -> known ?: TrackSource.ITUNES }
         return Track(
             isrc = k,
             title = title.trim().take(300).ifBlank { "Unknown title" },

@@ -27,6 +27,8 @@ private val contentType = "application/json".toMediaType()
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
+    @Provides fun spotifyCatalog(source: SpotApiCatalog): SpotifyCatalog = source
+
     @Provides
     @Singleton
     @Named("musicbrainz")

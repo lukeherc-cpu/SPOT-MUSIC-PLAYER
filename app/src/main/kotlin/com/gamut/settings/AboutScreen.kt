@@ -44,8 +44,8 @@ import com.gamut.core.designsystem.LocalNotifier
 import com.gamut.core.designsystem.R as DesignR
 import com.gamut.core.designsystem.ink
 
-private const val REPO_URL = "https://github.com/serptail/gamut"
-private const val REPO_LABEL = "github.com/serptail/gamut"
+private const val REPO_URL = "https://github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER"
+private const val REPO_LABEL = "github.com/lukeherc-cpu/SPOT-MUSIC-PLAYER"
 private const val LICENSE_URL = "$REPO_URL/blob/main/LICENSE"
 private const val AUTHOR_URL = "https://github.com/serptail"
 private const val AUTHOR_NAME = "serptail"
@@ -53,6 +53,7 @@ private const val LOGO_AUTHOR_URL = "https://github.com/serptail"
 private const val LOGO_AUTHOR_NAME = "serptail"
 
 private val Libraries = listOf(
+    Choice("SpotAPI catalog protocol", "Aran404/SpotAPI", "GPL-3.0; native Kotlin adaptation"),
     Choice("Jetpack Compose, Media3, Hilt", "AndroidX & Google", "Apache License 2.0"),
     Choice("NewPipe Extractor", "TeamNewPipe", "GPL-3.0"),
     Choice("Phosphor Icons", "Phosphor Icons", "MIT License"),
@@ -111,7 +112,7 @@ fun AboutScreen(
                 Text(version, style = MaterialTheme.typography.titleSmall, color = ink(0.85f), modifier = Modifier.padding(top = 4.dp))
             }
             Text(
-                "A free, open-source music player.",
+                "Spot Music · based on Gamut by serptail.\nSpotify catalog discovery powered by SpotAPI.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = ink(0.7f),
                 textAlign = TextAlign.Center,
