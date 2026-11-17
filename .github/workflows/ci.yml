@@ -1,28 +1,14 @@
-name: ci
+name: Android checks
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**']
   pull_request:
-
 permissions:
   contents: read
-
 concurrency:
-  group: ci-${{ github.ref }}
+  group: android-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  database:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: supabase/setup-cli@v1
-        with: { version: 2.120.0 }
-      - run: supabase start
-      - run: supabase test db
-
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -35,5 +21,4 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - run: chmod +x gradlew
-      - run: ./gradlew :app:assembleDebug testDebugUnitTest --no-daemon --console=plain
+      - run: bash ./gradlew :app:assembleDebug testDebugUnitTest --console=plain

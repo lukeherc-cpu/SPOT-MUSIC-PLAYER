@@ -1,3 +1,17 @@
+# Spot Music Player
+
+Android music and podcast player based on [Gamut by serptail](https://github.com/serptail/gamut), with a dark green Spotify-style interface, Home / Search / Your Library navigation, [SpotAPI](https://github.com/Aran404/SpotAPI) catalog discovery, and publisher-hosted podcast playback.
+
+No Real-Debrid account or separate server is needed. Music uses Gamut's existing source resolver and player. Spotify catalog search provides metadata; it does not supply Spotify audio. This fork is an Android app (Android 8+); the previous project's desktop/iOS implementation is not part of this codebase.
+
+- [SpotAPI integration and playback startup changes](docs/SPOTAPI_INTEGRATION.md)
+- [Podcast features and supported feeds](docs/PODCASTS.md)
+- Build: JDK 21, Android SDK 35, `bash ./gradlew :app:assembleDebug testDebugUnitTest`
+- Package: `com.lukeherc.spotmusic`, separate from official Gamut.
+- License: AGPL-3.0, with upstream attribution retained below. SpotAPI's adapted code also retains its GPL-3.0 notice and license.
+
+---
+
 <div align="center">
 
 <a href="https://serptail.github.io/gamut/">

@@ -17,13 +17,14 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.gamut"
+        applicationId = "com.lukeherc.spotmusic"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("gamut.versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("gamut.versionName") as String?) ?: "1.0"
 
-        val updateRepo = (project.findProperty("gamut.repo") as String?).orEmpty()
+        val updateRepo = (project.findProperty("gamut.repo") as String?) ?: "lukeherc-cpu/SPOT-MUSIC-PLAYER"
         val updateUrl = if (updateRepo.isBlank()) "" else "https://github.com/$updateRepo/releases/latest/download/latest.json"
         buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$updateUrl\"")
 
@@ -101,6 +102,7 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
 
+    implementation(libs.coil.compose)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
 
@@ -121,4 +123,20 @@ dependencies {
     implementation("androidx.browser:browser:1.8.0")
 
     baselineProfile(project(":baselineprofile"))
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+}
+
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    inputs.property("spotLiveSmoke", System.getenv("SPOT_LIVE_SMOKE").orEmpty())
+}
+
+dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.uiautomator)
 }

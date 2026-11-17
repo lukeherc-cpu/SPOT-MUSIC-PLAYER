@@ -21,11 +21,16 @@ class PrefetchCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val resolve: ResolveTrackSourceUseCase,
     private val audio: AudioSourceRepository,
+    private val settings: com.gamut.core.player.PlaybackSettings,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     private var activeJob: Job? = null
+    private var lastKeys: List<String> = emptyList()
 
     fun prefetch(tracks: List<Track>) {
+        val keys = tracks.take(PREFETCH_COUNT).map { it.isrc }
+        if (keys == lastKeys && activeJob?.isActive == true) return
+        lastKeys = keys
         activeJob?.cancel()
         activeJob = scope.launch {
             delay(DEBOUNCE_MS)
@@ -38,6 +43,8 @@ class PrefetchCoordinator @Inject constructor(
     }
 
     private fun allowed(): Boolean {
+        if (!settings.state.value.preload) return false
+        if (settings.state.value.preloadUnmeteredOnly && !settings.onUnmeteredNetwork()) return false
         val power = context.getSystemService(PowerManager::class.java)
         if (power.isPowerSaveMode) return false
         if (Build.VERSION.SDK_INT >= 29 && power.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE) return false
@@ -52,7 +59,7 @@ class PrefetchCoordinator @Inject constructor(
 
     private companion object {
         const val PREFETCH_COUNT = 2
-        const val DEBOUNCE_MS = 1_500L
+        const val DEBOUNCE_MS = 350L
         const val LOW_BATTERY_PERCENT = 15
     }
 }

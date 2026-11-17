@@ -108,6 +108,7 @@ fun LibraryScreen(
     suggestedArtists: List<LibraryArtist> = emptyList(),
     onOpenSearch: () -> Unit = {},
     onOpenLocal: () -> Unit = {},
+    onOpenPodcasts: () -> Unit = {},
     onPlayTrack: (Track, List<Track>) -> Unit = { _, _ -> },
 ) {
     val downloaded by viewModel.downloadedTracks.collectAsStateWithLifecycle()
@@ -176,6 +177,11 @@ fun LibraryScreen(
                         verticalArrangement = Arrangement.spacedBy(if (isGrid) 18.dp else 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
+                        if (filter == null) item(key = "podcasts", span = fullSpan) {
+                            LibraryRow(title = "Your podcasts", onClick = onOpenPodcasts,
+                                meta = { Text("Followed shows and episodes", color = TextSecondary, style = MaterialTheme.typography.bodyMedium) },
+                                cover = { RowCover(null, PhosphorIcons.Bold.MusicNoteSimple) })
+                        }
                         if (showOffline) {
                             if (downloaded.isEmpty()) {
                                 item(key = "offline-empty", span = fullSpan) {

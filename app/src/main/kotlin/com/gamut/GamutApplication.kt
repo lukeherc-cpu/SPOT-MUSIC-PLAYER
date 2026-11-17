@@ -43,16 +43,20 @@ class GamutApplication :
 
     @Inject lateinit var profileStore: ProfileStore
 
+    @Inject lateinit var podcastStore: com.gamut.podcasts.PodcastStore
+
     @Inject lateinit var shazamSession: ShazamSession
 
     override fun onCreate() {
         super.onCreate()
+        podcastStore.observe(player, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
         player.setSourceResolver { track, forceRefresh, onProgress ->
             if (!forceRefresh) {
                 downloadIndex.pathFor(track.isrc)?.let(::File)?.takeIf { it.exists() }?.let {
                     return@setSourceResolver Uri.fromFile(it).toString()
                 }
             }
+            track.directAudioUrl?.takeIf { track.source == com.gamut.core.model.TrackSource.PODCAST }?.let { return@setSourceResolver it }
             val source = resolveTrackSource(track).getOrNull() ?: return@setSourceResolver null
             onProgress(0.5f)
             audioSources.audioUrl(source.youtubeVideoId, forceRefresh).getOrNull()

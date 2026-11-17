@@ -18,6 +18,10 @@ import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import com.gamut.core.network.SpotifyCatalog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -25,7 +29,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
-data class SearchResult(val tracks: List<Track>, val isFinal: Boolean, val artist: ArtistSignal? = null)
+data class SearchResult(val tracks: List<Track>, val isFinal: Boolean, val artist: ArtistSignal? = null, val catalogNotice: String? = null)
 
 interface SearchRepository {
     fun search(query: String): Flow<SearchResult>
@@ -37,6 +41,7 @@ class SearchRepositoryImpl @Inject constructor(
     private val itunesApi: ItunesApi,
     private val deezerApi: DeezerApi,
     private val youtubeSource: YoutubeMusicSearchSource,
+    private val spotify: SpotifyCatalog,
 ) : SearchRepository {
     private val resultCache = ConcurrentHashMap<String, CachedResult>()
 
@@ -61,37 +66,65 @@ class SearchRepositoryImpl @Inject constructor(
             return@channelFlow
         }
 
-        val itunesDeferred = async { searchItunes(trimmed) }
-        val deezerDeferred = async { searchDeezerTracks(trimmed) }
-        val artistDeferred = async { lookupArtist(trimmed) }
-        val youtubeDeferred = async {
-            withTimeoutOrNull(YOUTUBE_BUDGET_MS) {
-                runCatching {
-                    val songs = youtubeSource.searchSongs(trimmed)
-                    if (songs.isNotEmpty()) songs else youtubeSource.searchBroad(trimmed)
-                }.getOrDefault(emptyList())
+        // Publish providers as they finish; a slow catalog must never hold back playable results.
+        val events = Channel<Part>(Channel.UNLIMITED)
+        launch { events.send(Part.Itunes(searchItunes(trimmed))) }
+        launch { events.send(Part.Deezer(searchDeezerTracks(trimmed))) }
+        launch { events.send(Part.Artist(lookupArtist(trimmed))) }
+        launch {
+            val tracks = withTimeoutOrNull(YOUTUBE_BUDGET_MS) {
+                try {
+                    youtubeSource.searchSongs(trimmed).ifEmpty { youtubeSource.searchBroad(trimmed) }
+                } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
             }.orEmpty()
+            events.send(Part.Youtube(tracks))
         }
-
-        val itunes = itunesDeferred.await()
-        val deezer = deezerDeferred.await()
-        val first = assemble(trimmed, itunes, deezer, emptyList(), boostArtist = false, youtube = emptyList())
-        send(SearchResult(first, isFinal = false))
-
-        val artist = artistDeferred.await()
-        val signal = ArtistSignal(TextMatch.norm(trimmed), artist?.name, artist?.fanCount)
-        send(SearchResult(first, isFinal = false, artist = signal))
-
+        launch {
+            val tracks = try {
+                withTimeoutOrNull(25_000L) { spotify.search(trimmed) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            events.send(Part.Spotify(tracks))
+        }
+        var itunes = emptyList<Track>()
+        var deezer = emptyList<DeezerTrackDto>()
+        var youtube = emptyList<YoutubeCandidate>()
+        var spotifyTracks = emptyList<Track>()
+        var artist: DeezerArtistDto? = null
+        var notice: String? = null
+        repeat(5) {
+            when (val part = events.receive()) {
+                is Part.Itunes -> itunes = part.tracks
+                is Part.Deezer -> deezer = part.tracks
+                is Part.Youtube -> youtube = part.tracks
+                is Part.Artist -> artist = part.artist
+                is Part.Spotify -> {
+                    spotifyTracks = part.tracks.orEmpty()
+                    if (part.tracks == null) notice = "Spotify catalog is unavailable. Showing other music sources."
+                }
+            }
+            val signal = ArtistSignal(TextMatch.norm(trimmed), artist?.name, artist?.fanCount)
+            val tracks = assemble(trimmed, spotifyTracks + itunes, deezer, emptyList(), false, youtube)
+            send(SearchResult(tracks, false, signal, notice))
+        }
+        val first = assemble(trimmed, spotifyTracks + itunes, deezer, emptyList(), false, youtube)
         val confidence = artist?.let { SearchRanking.artistConfidence(trimmed, it.name, it.fanCount, first) } ?: 0.0
         val boost = artist != null && confidence >= SearchRanking.ARTIST_BOOST_THRESHOLD
         val artistTracks = if (boost) topTracks(artist!!.id) else emptyList()
-
-        val youtube = youtubeDeferred.await()
-        val finalTracks = assemble(trimmed, itunes, deezer, artistTracks, boost, youtube)
-        if (finalTracks.isNotEmpty()) {
+        val finalTracks = assemble(trimmed, spotifyTracks + itunes, deezer, artistTracks, boost, youtube)
+        val signal = ArtistSignal(TextMatch.norm(trimmed), artist?.name, artist?.fanCount)
+        if (finalTracks.isNotEmpty() && notice == null) {
+            if (resultCache.size >= 50) resultCache.clear()
             resultCache[cacheKey] = CachedResult(finalTracks, signal, System.currentTimeMillis())
         }
-        send(SearchResult(finalTracks, isFinal = true, artist = signal))
+        send(SearchResult(finalTracks, true, signal, notice))
+    }
+
+    private sealed interface Part {
+        data class Itunes(val tracks: List<Track>) : Part
+        data class Deezer(val tracks: List<DeezerTrackDto>) : Part
+        data class Youtube(val tracks: List<YoutubeCandidate>) : Part
+        data class Artist(val artist: DeezerArtistDto?) : Part
+        data class Spotify(val tracks: List<Track>?) : Part
     }
 
     private suspend fun searchItunes(rawQuery: String): List<Track> {
@@ -180,8 +213,7 @@ class SearchRepositoryImpl @Inject constructor(
         val known = HashSet<String>()
         itunes.forEachIndexed { i, track ->
             val key = track.key()
-            known += key
-            candidates += Candidate(track, popularityByKey[key] ?: 0.0, i, boost = boostFor(key))
+            if (known.add(key)) candidates += Candidate(track, popularityByKey[key] ?: 0.0, i, boost = boostFor(key))
         }
         deezer.forEachIndexed { i, dto ->
             val track = dto.toDomain()
@@ -209,7 +241,13 @@ class SearchRepositoryImpl @Inject constructor(
                     penalty = YOUTUBE_PENALTY,
                 )
             }
-        return SearchRanking.rank(query, candidates)
+        val scorer = com.gamut.feature.resolver.CandidateScorer()
+        return SearchRanking.rank(query, candidates).map { track ->
+            if (track.youtubeVideoId != null) return@map track
+            val matches = youtube.filter { (it.isMusicCatalog || it.channelIsTopicChannel) && duplicates(it, track) }
+            val match = scorer.selectBest(matches, track)?.takeIf { it.confidenceScore >= 0.85f }
+            if (match != null) track.copy(youtubeVideoId = match.youtubeVideoId) else track
+        }
     }
 
     private fun YoutubeCandidate.toYoutubeOnlyTrack(): Track = Track(

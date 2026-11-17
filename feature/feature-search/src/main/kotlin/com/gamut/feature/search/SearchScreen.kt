@@ -50,6 +50,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -158,9 +159,9 @@ internal val TextTertiary: Color
     get() = ink(0.4f)
 
 private val PanelShape = RoundedCornerShape(16.dp)
-internal val CardShapeLarge = RoundedCornerShape(22.dp)
+internal val CardShapeLarge = RoundedCornerShape(8.dp)
 internal val RowShape = RoundedCornerShape(16.dp)
-internal val ThumbShape = RoundedCornerShape(10.dp)
+internal val ThumbShape = RoundedCornerShape(6.dp)
 
 private const val FILTER_ALL = 0
 private const val FILTER_CATALOG = 1
@@ -189,6 +190,8 @@ fun SearchScreen(
     onAddToPlaylist: (Track, String) -> Unit = { _, _ -> },
     barHeight: Dp,
     focusSearchTick: Int = 0,
+    homeMode: Boolean = false,
+    onOpenPodcasts: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val discover by viewModel.discover.collectAsStateWithLifecycle()
@@ -225,7 +228,7 @@ fun SearchScreen(
         val showingRecents = showingDiscover && fieldFocused && recentList.isNotEmpty()
 
         LaunchedEffect(focusSearchTick) {
-            if (focusSearchTick > 0) {
+            if (!homeMode && focusSearchTick > 0) {
                 delay(280)
                 listState.scrollToItem(0)
                 runCatching { searchFocus.requestFocus() }
@@ -266,7 +269,7 @@ fun SearchScreen(
             Column(m.fillMaxWidth().onSizeChanged { headerHeightPx = it.height }.statusBarsPadding()) {
                 Row(Modifier.fillMaxWidth().padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Discover",
+                        if (homeMode) "Home" else "Search",
                         style = MaterialTheme.typography.displayLarge,
                         color = TextPrimary,
                         modifier = Modifier.weight(1f),
@@ -302,7 +305,10 @@ fun SearchScreen(
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                SearchField(
+                if (homeMode) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = true, onClick = {}, label = { Text("Music") })
+                    FilterChip(selected = false, onClick = onOpenPodcasts, label = { Text("Podcasts") })
+                } else SearchField(
                     query = state.query,
                     onQueryChange = viewModel::updateQuery,
                     accent = accent,

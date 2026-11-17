@@ -25,3 +25,12 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 }
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+}
+
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    inputs.property("spotLiveSmoke", System.getenv("SPOT_LIVE_SMOKE").orEmpty())
+}

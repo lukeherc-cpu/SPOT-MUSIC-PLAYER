@@ -75,7 +75,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Bold
+import com.adamglin.phosphoricons.bold.House
 import com.adamglin.phosphoricons.bold.BookmarkSimple
+import com.gamut.podcasts.PodcastsViewModel
+import com.gamut.podcasts.PodcastsScreen
+import kotlin.math.roundToInt
 import com.adamglin.phosphoricons.bold.MagnifyingGlass
 import com.adamglin.phosphoricons.bold.User
 import com.gamut.account.AccountViewModel
@@ -260,7 +264,7 @@ private fun GamutApp(player: MusicPlayer, resolveTrackSource: ResolveTrackSource
     var showLoading by rememberSaveable { mutableStateOf(!GamutBoot.finished) }
     var forceReady by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(10_000)
+        delay(400)
         forceReady = true
     }
     val dataReady = forceReady || discover.tabs.isNotEmpty() || (!discover.isLoading && discover.error != null)
@@ -545,6 +549,7 @@ private fun GamutApp(player: MusicPlayer, resolveTrackSource: ResolveTrackSource
                             val openConnect = { showConnect = true }
                             val nowPlaying: @Composable () -> Unit = { NowPlayingStrip(player, docked = false, onOpen = openPlayer, onDevicesClick = openConnect) }
                             val nowPlayingDocked: @Composable () -> Unit = { NowPlayingStrip(player, docked = true, onOpen = openPlayer, onDevicesClick = openConnect) }
+                            val podcastsVm = hiltViewModel<PodcastsViewModel>()
                             val playTrackWithQueue: (Track, List<Track>) -> Unit = tap@{ track, queue ->
                                 if (loadedTrack?.isrc == track.isrc) {
                                     if (!isPlayingNow) player.resume()
@@ -572,6 +577,18 @@ private fun GamutApp(player: MusicPlayer, resolveTrackSource: ResolveTrackSource
                                         if (startIndex >= 0) player.setQueue(queue, startIndex)
                                         com.gamut.feature.playerui.components.WaveformSource.register(track, localFile.absolutePath)
                                         player.play(track, Uri.fromFile(localFile).toString())
+                                        resolvingIsrc = null
+                                        openPlayer()
+                                        return@launch
+                                    }
+                                    val podcastAudioUrl = track.directAudioUrl
+                                    if (track.source == com.gamut.core.model.TrackSource.PODCAST && podcastAudioUrl != null) {
+                                        val startIndex = queue.indexOfFirst { it.isrc == track.isrc }
+                                        if (startIndex >= 0) player.setQueue(queue, startIndex)
+                                        player.setShuffle(false)
+                                        player.play(track, podcastAudioUrl)
+                                        val resumeAt = podcastsVm.store.position(track.isrc)
+                                        if (resumeAt > 0) player.seekTo(resumeAt)
                                         resolvingIsrc = null
                                         openPlayer()
                                         return@launch
@@ -613,6 +630,7 @@ private fun GamutApp(player: MusicPlayer, resolveTrackSource: ResolveTrackSource
                                         homeAlpha = homeShift,
                                         showBar = !(playerCovering || createCovering),
                                         searchVm = searchVm,
+                                        podcastsVm = podcastsVm,
                                         libraryVm = appLibraryVm,
                                         resolvingIsrc = resolvingIsrc,
                                         selectedTrack = selectedTrack,
@@ -926,7 +944,7 @@ private fun GamutApp(player: MusicPlayer, resolveTrackSource: ResolveTrackSource
                 exit = fadeOut(tween(450, easing = GamutMotion.Standard)) +
                     scaleOut(tween(450, easing = GamutMotion.Standard), targetScale = 1.05f),
             ) {
-                GamutLoadingScreen(dataReady = dataReady, onFinished = { showLoading = false })
+                GamutLoadingScreen(dataReady = dataReady, minDurationMs = 400, onFinished = { showLoading = false })
             }
         }
     }
@@ -1001,6 +1019,7 @@ private fun HomeTabs(
     homeAlpha: State<Float>,
     showBar: Boolean,
     searchVm: SearchViewModel,
+    podcastsVm: PodcastsViewModel,
     libraryVm: LibraryViewModel,
     resolvingIsrc: String?,
     selectedTrack: Track?,
@@ -1041,24 +1060,24 @@ private fun HomeTabs(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
-    var widthPx by remember { mutableFloatStateOf(1f) }
     val palette = LocalCoverPalette.current
-    val shownTab by remember { derivedStateOf { if (position.value > 0.5f) 1 else 0 } }
+    val shownTab by remember { derivedStateOf { position.value.roundToInt().coerceIn(0, 3) } }
     val barComposed by remember { derivedStateOf { homeAlpha.value > 0f } }
 
     fun goTo(target: Int) {
+        if (target == 0) searchVm.updateQuery("")
         tab = target
-        scope.launch { position.animateTo(target.toFloat(), tween(TAB_SWITCH_MS, easing = GamutMotion.Standard)) }
+        scope.launch { position.snapTo(target.toFloat()) }
     }
 
     LaunchedEffect(openSearchTick) {
         if (openSearchTick > 0) {
-            goTo(0)
+            goTo(1)
             focusSearchTick++
         }
     }
-    LaunchedEffect(openLibraryTick) { if (openLibraryTick > 0) goTo(1) }
-    BackHandler(enabled = active && tab == 1) { goTo(0) }
+    LaunchedEffect(openLibraryTick) { if (openLibraryTick > 0) goTo(2) }
+    BackHandler(enabled = active && tab != 0) { goTo(0) }
     if (active) TransparentStatusBar(darkIcons = palette.isLight)
 
     Box(
@@ -1073,32 +1092,12 @@ private fun HomeTabs(
             .focusLayer(active),
     ) {
         FocusLive(active) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
-                    .draggable(
-                        orientation = Orientation.Horizontal,
-                        enabled = active,
-                        state = rememberDraggableState { dx ->
-                            scope.launch { position.snapTo((position.value - dx / widthPx).coerceIn(0f, 1f)) }
-                        },
-                        onDragStarted = { position.stop() },
-                        onDragStopped = { velocity ->
-                            goTo(
-                                when {
-                                    velocity < -TAB_FLING_VELOCITY -> 1
-                                    velocity > TAB_FLING_VELOCITY -> 0
-                                    position.value > 0.5f -> 1
-                                    else -> 0
-                                },
-                            )
-                        },
-                    ),
-            ) {
-                TabLayer(page = 0, position = { position.value }, active = shownTab == 0) {
+            Box(Modifier.fillMaxSize()) {
+                TabLayer(page = if (tab == 1) 1 else 0, position = { position.value }, active = shownTab == 0 || shownTab == 1) {
                     SearchScreen(
                         viewModel = searchVm,
+                        homeMode = tab == 0,
+                        onOpenPodcasts = { goTo(3) },
                         resolvingIsrc = resolvingIsrc,
                         onTrackSelected = onTrackSelected,
                         onArtistSelected = onArtistSelected,
@@ -1122,7 +1121,7 @@ private fun HomeTabs(
                         focusSearchTick = focusSearchTick,
                     )
                 }
-                TabLayer(page = 1, position = { position.value }, active = shownTab == 1) {
+                TabLayer(page = 2, position = { position.value }, active = shownTab == 2) {
                     LibraryScreen(
                         artists = followedArtists,
                         artistsLoading = followedEntities == null,
@@ -1134,20 +1133,25 @@ private fun HomeTabs(
                         onOpenPlaylist = onOpenPlaylist,
                         onCreatePlaylist = onCreatePlaylist,
                         onOpenLocal = onOpenLocal,
+                        onOpenPodcasts = { goTo(3) },
                         onOpenSearch = {
-                            goTo(0)
+                            goTo(1)
                             focusSearchTick++
                         },
                         barHeight = barHeight,
                     )
                 }
             }
+            TabLayer(page = 3, position = { position.value }, active = shownTab == 3) {
+                PodcastsScreen(podcastsVm, barHeight, active && shownTab == 3, onTrackSelected)
+            }
             if (showBar && barComposed) {
                 CoverTheme(palette) {
                     GamutBottomBar(
                         items = listOf(
-                            BottomBarItem("Discover", PhosphorIcons.Bold.MagnifyingGlass, selected = shownTab == 0, onClick = if (shownTab == 0) null else ({ goTo(0) })),
-                            BottomBarItem("Library", PhosphorIcons.Bold.BookmarkSimple, selected = shownTab == 1, onClick = if (shownTab == 1) null else ({ goTo(1) })),
+                            BottomBarItem("Home", PhosphorIcons.Bold.House, selected = shownTab == 0 || shownTab == 3, onClick = { goTo(0) }),
+                            BottomBarItem("Search", PhosphorIcons.Bold.MagnifyingGlass, selected = shownTab == 1, onClick = { goTo(1); focusSearchTick++ }),
+                            BottomBarItem("Your Library", PhosphorIcons.Bold.BookmarkSimple, selected = shownTab == 2, onClick = { goTo(2) }),
                         ),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)

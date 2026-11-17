@@ -16,7 +16,8 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 private val VIDEOS = listOf("dQw4w9WgXcQ", "9bZkp7q19f0", "kJQP7kiw5Fk", "JGwWNGJdvx8", "fJ9rUzIMcZQ")
 
-fun main() {
+fun main(args: Array<String>) {
+    val quick = "--quick" in args
     val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -25,7 +26,7 @@ fun main() {
 
     var passed = 0
     var total = 0
-    for (id in VIDEOS) {
+    for (id in if (quick) VIDEOS.take(1) else VIDEOS) {
         total++
         if (attempt("stream $id") { streamPlays(client, id) }) passed++
     }
@@ -33,13 +34,15 @@ fun main() {
     if (attempt("song search") { searchWorks() }) passed++
 
     println("SMOKE_RESULT passed=$passed total=$total")
+    if (passed != total) kotlin.system.exitProcess(1)
 }
 
 private fun attempt(label: String, block: () -> Boolean): Boolean {
+    val start = System.nanoTime()
     repeat(2) { n ->
         try {
             if (block()) {
-                println("ok    $label")
+                println("ok    $label (${"%.0f".format((System.nanoTime() - start) / 1_000_000.0)} ms)")
                 return true
             }
             println("fail  $label (try ${n + 1})")

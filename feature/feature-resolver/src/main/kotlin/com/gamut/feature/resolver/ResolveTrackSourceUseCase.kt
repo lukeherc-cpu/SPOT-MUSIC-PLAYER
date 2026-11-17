@@ -114,6 +114,14 @@ class ResolveTrackSourceUseCase @Inject constructor(
     private suspend fun resolveOrThrow(track: Track): ResolvedSource {
         val resolutionKey = track.resolutionKey()
         sources.getLocal(resolutionKey)?.let { return it }
+        val youtubeVideoId = track.youtubeVideoId
+        if (track.source != TrackSource.PODCAST && youtubeVideoId != null && com.gamut.core.network.isValidYoutubeVideoId(youtubeVideoId)) {
+            val direct = ResolvedSource(resolutionKey, youtubeVideoId, if (track.source == TrackSource.YOUTUBE) ResolutionMethod.DIRECT else ResolutionMethod.HARD_FILTER, 1.0f, 0)
+            sources.saveLocal(direct)
+            appScope.launch { sources.submitRemote(direct) }
+            return direct
+        }
+
         val remote = try {
             withTimeoutOrNull(REMOTE_LOOKUP_TIMEOUT_MS) { sources.getRemote(resolutionKey) }
         } catch (e: CancellationException) {
@@ -126,13 +134,6 @@ class ResolveTrackSourceUseCase @Inject constructor(
             return it
         }
 
-        val youtubeVideoId = track.youtubeVideoId
-        if (track.source == TrackSource.YOUTUBE && !youtubeVideoId.isNullOrBlank()) {
-            val direct = ResolvedSource(resolutionKey, youtubeVideoId, ResolutionMethod.DIRECT, 1.0f, 0)
-            sources.saveLocal(direct)
-            appScope.launch { sources.submitRemote(direct) }
-            return direct
-        }
 
         val songs = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { candidates.songs(track) }
             ?: throw ResolveFailure.Timeout("songs search")

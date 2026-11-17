@@ -43,13 +43,13 @@ val GamutCard = Color(0xFFFFFFFF)
 val GamutHairline = Color(0xFFE9E7EC)
 val GamutShadow = Color(0x1F1B1B1F)
 
-val GamutAccentA = Color(0xFF8E8CF0)
+val GamutAccentA = Color(0xFF1ED760)
 val GamutAccentB = Color(0xFF6FC8E8)
 val GamutAccentC = Color(0xFFB8A6F5)
 
 private val GamutColors = lightColorScheme(
     primary = GamutAccentA,
-    onPrimary = Color.White,
+    onPrimary = Color.Black,
     secondary = GamutAccentB,
     background = GamutPaper,
     surface = GamutCard,
@@ -59,8 +59,8 @@ private val GamutColors = lightColorScheme(
 )
 
 val GamutDisplayFont = FontFamily(
-    Font(R.font.codenext_extrabold, FontWeight.ExtraBold, FontStyle.Normal),
-    Font(R.font.codenext_extrabolditalic, FontWeight.ExtraBold, FontStyle.Italic),
+    Font(R.font.inter_semibold, FontWeight.ExtraBold, FontStyle.Normal),
+    Font(R.font.inter_semibold, FontWeight.ExtraBold, FontStyle.Italic),
 )
 
 private val GamutBodyFont = FontFamily(
@@ -85,7 +85,7 @@ private val GamutTypography = Typography().run {
 
 private val GamutDarkColors = darkColorScheme(
     primary = GamutAccentA,
-    onPrimary = Color.White,
+    onPrimary = Color.Black,
     secondary = GamutAccentB,
     background = Color(0xFF0B0B0D),
     surface = Color(0xFF16161A),
@@ -101,13 +101,13 @@ fun GamutTheme(dark: Boolean = false, content: @Composable () -> Unit) {
 
 @Composable
 fun GamutBackdrop(content: @Composable BoxScope.() -> Unit) {
-    Box(modifier = Modifier.background(GamutPaper), content = content)
+    Box(modifier = Modifier.background(MaterialTheme.colorScheme.background), content = content)
 }
 
 val CardShape = RoundedCornerShape(18.dp)
 val PillShape = RoundedCornerShape(50)
-val ArtworkShape = RoundedCornerShape(16.dp)
-val ArtworkShapeLarge = RoundedCornerShape(24.dp)
+val ArtworkShape = RoundedCornerShape(6.dp)
+val ArtworkShapeLarge = RoundedCornerShape(8.dp)
 
 fun Modifier.hairlineBorder(shape: Shape = CardShape, color: Color = GamutHairline): Modifier = this.border(width = 1.dp, color = color, shape = shape)
 
