@@ -45,7 +45,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -camera-back none
           script: |
-            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain
+            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain || (adb logcat -d -s TestRunner AndroidRuntime; exit 1)
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-home.png > ui-home.png
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-search.png > ui-search.png
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-podcasts.png > ui-podcasts.png

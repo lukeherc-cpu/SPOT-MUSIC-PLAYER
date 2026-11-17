@@ -13,10 +13,7 @@ import com.gamut.core.database.DownloadIndex
 import com.gamut.core.model.Track
 import com.gamut.feature.library.LibraryRepository
 import com.gamut.podcasts.*
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -25,14 +22,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface UiTestData {
-    fun library(): LibraryRepository
-    fun downloads(): DownloadIndex
-    fun podcasts(): PodcastStore
-}
 
 @RunWith(AndroidJUnit4::class)
 class NavigationSmokeTest {
@@ -52,18 +41,18 @@ class NavigationSmokeTest {
         val art = "https://i.scdn.co/image/ab67616d0000b2731d97ca7376f835055771828e"
         val first = Track("ui-reference-one", title = "First UI Song", artist = "Reference Artist", album = "Reference Album", durationMs = 60000, albumArtUrl = art)
         val second = first.copy(isrc = "ui-reference-two", title = "Second UI Song")
-        val id = data.library().importPlaylist("UI Reference Playlist", art, listOf(first, second, first))
-        assertEquals(listOf(first.isrc, second.isrc), data.library().observeTracks(id).first().map { it.isrc })
-        data.library().addFavorite(first, System.currentTimeMillis())
+        val id = data.testLibraryRepository().importPlaylist("UI Reference Playlist", art, listOf(first, second, first))
+        assertEquals(listOf(first.isrc, second.isrc), data.testLibraryRepository().observeTracks(id).first().map { it.isrc })
+        data.testLibraryRepository().addFavorite(first, System.currentTimeMillis())
         val show = PodcastShow("ui-reference-show", "Reference Podcast", "Reference Host", "https://example.org/reference.xml", art)
-        if (data.podcasts().shows.value.none { it.feedUrl == show.feedUrl }) data.podcasts().toggle(show)
+        if (data.testPodcastStore().shows.value.none { it.feedUrl == show.feedUrl }) data.testPodcastStore().toggle(show)
         val audio = File(context.filesDir, "ui-reference.wav")
         val bytes = 8000 * 60 * 2
         val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
         header.put("RIFF".toByteArray()).putInt(bytes + 36).put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(8000).putInt(16000).putShort(2).putShort(16).put("data".toByteArray()).putInt(bytes)
         audio.outputStream().use { it.write(header.array()); it.write(ByteArray(bytes)) }
-        for (track in listOf(first, second)) data.downloads().save(DownloadEntity(track.isrc, audio.absolutePath, System.currentTimeMillis(), audio.length()))
-        data.downloads().downloads.first { first.isrc in it && second.isrc in it }
+        for (track in listOf(first, second)) data.testDownloadIndex().save(DownloadEntity(track.isrc, audio.absolutePath, System.currentTimeMillis(), audio.length()))
+        data.testDownloadIndex().downloads.first { first.isrc in it && second.isrc in it }
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ActivityScenario.launch(MainActivity::class.java).use {
             assertTrue("Home did not become available", device.wait(Until.hasObject(By.text("Liked Songs")), 30000))
