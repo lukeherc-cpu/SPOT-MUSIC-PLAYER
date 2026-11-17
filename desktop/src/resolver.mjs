@@ -12,7 +12,7 @@ const run=promisify(execFile);
 export class Resolver {
   constructor(directory,binary,runtime,runner=run){this.directory=directory;this.binary=binary;this.runtime=runtime;this.run=runner;this.cache=new Map();this.active=new Map();this.tokens=new Map();this.tail=Promise.resolve();}
   async load(){await mkdir(this.directory,{recursive:true});try{for(const entry of JSON.parse(await readFile(path.join(this.directory,'sources.json'),'utf8')))if(entry.expires>Date.now()||entry.file)this.cache.set(entry.id,entry);}catch(e){if(e.code!=='ENOENT')throw e;}}
-  persist(){this.tail=this.tail.catch(()=>{}).then(async()=>{const file=path.join(this.directory,'sources.json');const values=[...this.cache.values()].filter(x=>x.file||x.expires>Date.now()).slice(-500);await writeFile(file+'.tmp',JSON.stringify(values),{mode:0o600});await rename(file+'.tmp',file);});return this.tail;}
+  persist(){this.tail=this.tail.catch(()=>{}).then(async()=>{const file=path.join(this.directory,'sources.json');const entries=[...this.cache.values()];const values=[...entries.filter(x=>x.file),...entries.filter(x=>!x.file&&x.expires>Date.now()).slice(-500)];await writeFile(file+'.tmp',JSON.stringify(values),{mode:0o600});await rename(file+'.tmp',file);});return this.tail;}
   async resolve(track,force=false){
     const saved=this.cache.get(track.isrc);
     if(saved?.file){try{await stat(path.join(this.directory,saved.file));return this.token(saved);}catch{this.cache.delete(track.isrc);}}

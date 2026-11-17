@@ -46,11 +46,11 @@ jobs:
             platform: linux
             target: linux
             arch: x64
-          - os: macos-15-intel
+          - os: macos-26-intel
             platform: mac
             target: mac
             arch: x64
-          - os: macos-15
+          - os: macos-26
             platform: mac
             target: mac
             arch: arm64

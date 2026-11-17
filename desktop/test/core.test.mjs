@@ -58,6 +58,10 @@ test('saved source URLs persist across restart, expiry forces a new lookup, loca
   const bytes=Buffer.from('0123456789');await writeFile(path.join(directory,'saved.audio'),bytes);restart.cache.set('one',{id:'one',file:'saved.audio',mime:'audio/wav',expires:0});
   const source=await restart.resolve(song());const response=await restart.response(new Request(source.url,{headers:{Range:'bytes=2-5'}}));
   assert.equal(response.status,206);assert.equal(await response.text(),'2345');assert.equal(response.headers.get('content-range'),'bytes 2-5/10');assert.equal(calls,2);
+  for(let i=0;i<501;i++)restart.cache.set(`stream-${i}`,{id:`stream-${i}`,url:'https://rr1.googlevideo.com/audio',expires:Date.now()+3600000});
+  await restart.persist();
+  const afterEviction=new Resolver(directory,'unused','unused',runner);await afterEviction.load();
+  assert.equal((await afterEviction.resolve(song())).saved,true);assert.equal(calls,2);
   if(process.platform!=='win32')assert.equal((await stat(path.join(directory,'sources.json'))).mode&0o777,0o600);
 });
 test('mixes follow listening history and rotate without podcast contamination',async()=>{
