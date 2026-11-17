@@ -21,3 +21,7 @@ These timings are individual network smoke checks, not measured Android tap-to-a
 The local Android software emulator crashed before screen verification could finish. GitHub Actions subsequently passed both Android instrumentation checks: navigation between Home, Search, Library and Podcasts, and parsing a publisher-style feed on Android. Home, Search and Podcasts screenshots were captured. The first cloud release compilation then reached its JVM metaspace limit, so the workflow now runs UI checks, unit tests and release compilation in fresh Gradle processes with a larger metaspace limit. APK publication is being retried. No physical-device or Android Auto validation has been performed.
 
 Alpha APKs use a separate application ID (`com.lukeherc.spotmusic`) and development signing. The previous Cadence project is preserved separately and has no role in this fork's playback.
+
+## Complete interface replacement
+
+On November 17, 2026, the application entry point was replaced with the new `spot` screens. Debug and instrumentation APKs compile and unit tests pass. Live Spotify rich search returned 25 songs, albums, artists and playlists; album loading and public playlist loading passed. New Android instrumentation seeds a saved local audio file, checks transactional playlist order/deduplication, navigates Home/Search/Library, plays the local song, opens the full player and reaches Spotify import, capturing seven screens. Runtime results for this replacement are pending the new GitHub run.

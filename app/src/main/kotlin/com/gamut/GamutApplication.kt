@@ -9,6 +9,7 @@ import com.gamut.account.ProfileStore
 import com.gamut.core.database.DownloadIndex
 import com.gamut.core.player.MusicPlayer
 import com.gamut.core.sync.SyncManager
+import com.gamut.feature.library.localUri
 import com.gamut.feature.resolver.AndroidYtDlpEngine
 import com.gamut.feature.resolver.AudioSourceRepository
 import com.gamut.feature.resolver.ResolveTrackSourceUseCase
@@ -51,6 +52,7 @@ class GamutApplication :
         super.onCreate()
         podcastStore.observe(player, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
         player.setSourceResolver { track, forceRefresh, onProgress ->
+            track.localUri()?.let { return@setSourceResolver it.toString() }
             if (!forceRefresh) {
                 downloadIndex.pathFor(track.isrc)?.let(::File)?.takeIf { it.exists() }?.let {
                     return@setSourceResolver Uri.fromFile(it).toString()

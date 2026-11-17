@@ -26,6 +26,25 @@ class SpotApiCatalogTest {
     @Test fun rejectsChangedSearchEnvelopesRatherThanClaimingNoMatches() {
         assertThrows(Exception::class.java) { SpotApiCatalog.parseTracks(Json.parseToJsonElement("{}").jsonObject) }
     }
+    @Test fun validatesSpotifyImportLinks() {
+        assertEquals("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", SpotApiCatalog.spotifyResource("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=example"))
+        assertThrows(IllegalArgumentException::class.java) { SpotApiCatalog.spotifyResource("https://example.org/playlist/37i9dQZF1DXcBWIGoYBM5M") }
+        assertThrows(IllegalArgumentException::class.java) { SpotApiCatalog.spotifyResource("https://open.spotify.com/playlist/../../secret") }
+    }
+    @Test fun liveCollectionsAndRichSearch() = runBlocking {
+        assumeTrue(System.getenv("SPOT_LIVE_SMOKE") == "1")
+        val catalog = SpotApiCatalog()
+        val search = catalog.searchAll("Daft Punk")
+        println("Rich Spotify search: ${search.tracks.size} songs, ${search.albums.size} albums, ${search.artists.size} artists, ${search.playlists.size} playlists")
+        assertTrue(search.albums.isNotEmpty())
+        assertTrue(search.artists.isNotEmpty())
+        for (uri in listOf("spotify:album:4m2880jivSbbyEGAKfITCa", "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", "spotify:playlist:37i9dQZF1DX4UtSsGT1Sbe", "spotify:artist:4tZwfgrHOc3mvqYlEYSvVi")) {
+            val collection = catalog.collection(uri)
+            assertTrue("No songs for $uri", collection.tracks.isNotEmpty())
+            assertEquals(collection.total, collection.tracks.size + collection.skipped)
+            println("Spotify collection ${collection.title}: ${collection.tracks.size} songs, ${collection.total} items")
+        }
+    }
     @Test fun liveSpotifyCatalogSmoke() = runBlocking {
         assumeTrue(System.getenv("SPOT_LIVE_SMOKE") == "1")
         val start = System.nanoTime()

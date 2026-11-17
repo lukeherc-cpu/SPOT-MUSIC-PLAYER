@@ -1,6 +1,7 @@
 package com.gamut.feature.library
 
 import android.net.Uri
+import androidx.room.withTransaction
 import com.gamut.core.database.FavoriteDao
 import com.gamut.core.database.FavoriteEntity
 import com.gamut.core.database.PendingSyncDao
@@ -31,6 +32,11 @@ interface LibraryRepository {
     fun observePlaylists(): Flow<List<Playlist>>
     fun observeTracks(playlistId: Long): Flow<List<Track>>
     suspend fun createPlaylist(name: String, tags: List<String> = emptyList(), coverUri: String? = null): Long
+    suspend fun importPlaylist(name: String, artwork: String?, songs: List<Track>): Long {
+        val id = createPlaylist(name, coverUri = artwork)
+        songs.distinctBy { it.isrc }.forEach { appendTrack(id, it) }
+        return id
+    }
     suspend fun updatePlaylist(id: Long, name: String, tags: List<String>, coverUri: String?)
     suspend fun deletePlaylist(id: Long)
     suspend fun replaceTracks(playlistId: Long, tracks: List<Track>)
@@ -45,6 +51,7 @@ interface LibraryRepository {
 }
 
 class LibraryRepositoryImpl @Inject constructor(
+    private val database: com.gamut.core.database.GamutDatabase,
     private val playlists: PlaylistDao,
     private val tracks: PlaylistTrackDao,
     private val trackDao: TrackDao,
@@ -63,6 +70,12 @@ class LibraryRepositoryImpl @Inject constructor(
         val id = playlists.insert(PlaylistEntity(name = name, createdAtEpochMs = System.currentTimeMillis(), coverUri = coverUri, tags = tags.toTagColumn()))
         mark(SyncTypes.PL, id.toString())
         return id
+    }
+
+    override suspend fun importPlaylist(name: String, artwork: String?, songs: List<Track>): Long = database.withTransaction {
+        val id = createPlaylist(name, coverUri = artwork)
+        songs.distinctBy { it.isrc }.forEach { appendTrack(id, it) }
+        id
     }
 
     override suspend fun updatePlaylist(id: Long, name: String, tags: List<String>, coverUri: String?) {
