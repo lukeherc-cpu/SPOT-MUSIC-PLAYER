@@ -44,6 +44,7 @@ android {
     sourceSets {
         getByName("main") {
             res.srcDir("${rootDir}/gamut-brandkit/res")
+            assets.srcDir("${rootDir}/docs/licenses")
         }
     }
 

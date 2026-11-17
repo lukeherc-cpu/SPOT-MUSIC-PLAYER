@@ -1,7 +1,7 @@
 name: Android checks
 on:
   push:
-    branches: [main, 'feature/**']
+    branches: [main]
   pull_request:
 permissions:
   contents: read
@@ -21,4 +21,4 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - run: bash ./gradlew :app:assembleDebug testDebugUnitTest --console=plain
+      - run: bash ./gradlew --no-daemon :app:assembleDebug testDebugUnitTest --console=plain

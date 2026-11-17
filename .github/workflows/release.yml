@@ -23,6 +23,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - name: Keep the development signing identity across alpha builds
         uses: actions/cache@v4
         with:
@@ -43,13 +45,14 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -camera-back none
           script: |
-            bash ./gradlew :app:connectedDebugAndroidTest --console=plain
+            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-home.png > ui-home.png
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-search.png > ui-search.png
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-podcasts.png > ui-podcasts.png
       - name: Test and build
         run: |
-          bash ./gradlew testDebugUnitTest :app:assembleRelease --console=plain \
+          bash ./gradlew --no-daemon testDebugUnitTest --console=plain
+          bash ./gradlew --no-daemon :app:assembleRelease --console=plain \
             -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" \
             -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))" \
             -Pgamut.repo="$GITHUB_REPOSITORY" -Pgamut.abis=arm64-v8a
