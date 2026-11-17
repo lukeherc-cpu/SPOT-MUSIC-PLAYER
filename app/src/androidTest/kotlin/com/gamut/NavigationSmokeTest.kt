@@ -91,6 +91,11 @@ class NavigationSmokeTest {
     private fun bottom(device: UiDevice, label: String) = device.findObjects(By.text(label)).maxBy { it.visibleBounds.bottom }.click()
     private fun screenshot(device: UiDevice, context: Context, name: String) {
         device.waitForIdle()
-        device.takeScreenshot(File(context.cacheDir, "ui-$name.png"))
+        // connectedAndroidTest uninstalls the target app at completion, deleting its cache.
+        // The automation shell writes previews outside app data so CI can export them afterward.
+        val path = "/sdcard/spot-ui-$name.png"
+        device.executeShellCommand("screencap -p $path")
+        val bytes = device.executeShellCommand("stat -c %s $path").trim().toLongOrNull() ?: 0
+        assertTrue("Screenshot $name was not written", bytes > 1000)
     }
 }
