@@ -1,6 +1,6 @@
 # Validation
 
-Tested locally on November 16, 2026, using JDK 21 and Android SDK 35.
+Tested locally on November 16–17, 2026, using JDK 21 and Android SDK 35.
 
 - `:app:assembleDebug` passes (universal APK).
 - `:app:assembleRelease -Pgamut.abis=arm64-v8a` passes locally; the APK signature verifies and both upstream license texts are bundled as assets.
@@ -18,7 +18,7 @@ Tested locally on November 16, 2026, using JDK 21 and Android SDK 35.
 
 These timings are individual network smoke checks, not measured Android tap-to-audio latency. Networks, extractor changes, source availability and cache state affect playback.
 
-The local Android software emulator crashed before screen verification could finish. GitHub Actions subsequently passed both Android instrumentation checks: navigation between Home, Search, Library and Podcasts, and parsing a publisher-style feed on Android. Home, Search and Podcasts screenshots were captured. The first cloud release compilation then reached its JVM metaspace limit, so the workflow now runs UI checks, unit tests and release compilation in fresh Gradle processes with a larger metaspace limit. APK publication is being retried. No physical-device or Android Auto validation has been performed.
+The local Android software emulator could not complete screen verification. Android UI checks therefore run on the GitHub Actions API 30 emulator. The release workflow runs instrumentation, unit tests and release compilation in separate Gradle processes. Alpha 5 has been published with seven verified PNG previews. No physical-device or Android Auto validation has been performed.
 
 Alpha APKs use a separate application ID (`com.lukeherc.spotmusic`) and development signing. The previous Cadence project is preserved separately and has no role in this fork's playback.
 

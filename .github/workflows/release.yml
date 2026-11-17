@@ -1,7 +1,10 @@
 name: Spot Music Android build
 on:
   push:
-    branches: ['feature/spotify-podcasts']
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -78,6 +81,7 @@ jobs:
           - Larger publisher feed support and HTTPS upgrades for legacy podcast links.
           - Persistent, expiring audio source cache for faster repeat playback.
           - Progressive music search, earlier source prefetch and a smaller initial audio buffer.
+          - Thin player seek bar with a round thumb and artwork failure placeholders.
 
           Install Spot-Music-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and the previous Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
           NOTES

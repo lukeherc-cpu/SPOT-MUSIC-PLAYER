@@ -1,6 +1,7 @@
 package com.gamut
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -38,7 +39,7 @@ class NavigationSmokeTest {
     @Test fun replacementScreensLibraryPlaybackAndImportAreReachable() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val data = EntryPointAccessors.fromApplication(context, UiTestData::class.java)
-        val art = "https://i.scdn.co/image/ab67616d0000b2731d97ca7376f835055771828e"
+        val art = "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e029b9b36b0e22870b9f542d937"
         val first = Track("ui-reference-one", title = "First UI Song", artist = "Reference Artist", album = "Reference Album", durationMs = 60000, albumArtUrl = art)
         val second = first.copy(isrc = "ui-reference-two", title = "Second UI Song")
         val id = data.testLibraryRepository().importPlaylist("UI Reference Playlist", art, listOf(first, second, first))
@@ -57,39 +58,42 @@ class NavigationSmokeTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             assertTrue("Home did not become available", device.wait(Until.hasObject(By.text("Liked Songs")), 30000))
             device.wait(Until.hasObject(By.text("Picked for you")), 12000)
-            screenshot(device, context, "home")
+            screenshot(device, "home")
             device.findObject(By.text("Podcasts")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Your shows")), 5000))
-            screenshot(device, context, "podcasts")
+            screenshot(device, "podcasts")
             bottom(device, "Search")
             assertTrue(device.wait(Until.hasObject(By.text("What do you want to listen to?")), 5000))
             assertNotNull(device.findObject(By.text("Browse all")))
             assertNull(device.findObject(By.text("Catalog")))
-            screenshot(device, context, "search")
+            screenshot(device, "search")
             bottom(device, "Your Library")
             assertTrue(device.wait(Until.hasObject(By.text("UI Reference Playlist")), 5000))
             assertNotNull(device.findObject(By.text("Reference Podcast")))
-            screenshot(device, context, "library")
+            screenshot(device, "library")
             device.findObject(By.text("UI Reference Playlist")).click()
             assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
-            screenshot(device, context, "playlist")
+            screenshot(device, "playlist")
             device.findObject(By.desc("Play collection")).click()
             assertTrue("Local saved song did not start", device.wait(Until.hasObject(By.desc("Pause")), 15000))
             device.findObjects(By.text("First UI Song")).maxBy { it.visibleBounds.bottom }.click()
             assertTrue(device.wait(Until.hasObject(By.text("PLAYING FROM YOUR MUSIC")), 5000))
             assertNotNull(device.findObject(By.desc("Close player")))
-            screenshot(device, context, "player")
+            screenshot(device, "player")
             device.findObject(By.desc("Close player")).click()
             device.pressBack()
             bottom(device, "Your Library")
             device.findObject(By.text("Import from Spotify")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Bring your music with you")), 5000))
             assertNotNull(device.findObject(By.text("Spotify link")))
-            screenshot(device, context, "import")
+            screenshot(device, "import")
         }
     }
     private fun bottom(device: UiDevice, label: String) = device.findObjects(By.text(label)).maxBy { it.visibleBounds.bottom }.click()
-    private fun screenshot(device: UiDevice, context: Context, name: String) {
+    private fun screenshot(device: UiDevice, name: String) {
+        device.waitForIdle()
+        // Accessibility can update before Compose submits the corresponding display frame.
+        SystemClock.sleep(1500)
         device.waitForIdle()
         // connectedAndroidTest uninstalls the target app at completion, deleting its cache.
         // The automation shell writes previews outside app data so CI can export them afterward.

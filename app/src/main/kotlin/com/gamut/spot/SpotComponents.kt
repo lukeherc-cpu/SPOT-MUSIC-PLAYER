@@ -22,7 +22,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.gamut.core.model.Track
 import com.gamut.core.network.SpotifyCard
 
@@ -73,7 +73,8 @@ internal fun SChip(text: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 internal fun SArt(url: String?, modifier: Modifier = Modifier, liked: Boolean = false, circle: Boolean = false) {
     Box(modifier.clip(if (circle) CircleShape else RoundedCornerShape(3.dp)).then(if (liked) Modifier.background(LikedBrush) else Modifier.background(Card)), contentAlignment = Alignment.Center) {
-        if (url != null && !liked) AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (url != null && !liked) SubcomposeAsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
+            error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Filled.MusicNote, null, tint = Muted, modifier = Modifier.fillMaxSize(.38f)) } })
         else Icon(if (liked) Icons.Filled.Favorite else Icons.Filled.MusicNote, null, tint = Color.White, modifier = Modifier.fillMaxSize(.38f))
     }
 }
