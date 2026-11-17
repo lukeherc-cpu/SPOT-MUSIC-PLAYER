@@ -1,5 +1,6 @@
 package com.gamut.feature.resolver
 
+import android.os.Build
 import com.gamut.core.network.YoutubeCandidate
 import com.gamut.core.network.YoutubeMusicSearchSource
 import com.gamut.core.network.isValidYoutubeVideoId
@@ -27,6 +28,7 @@ class NewPipeYoutubeSource @Inject constructor(
     @Named("youtube") private val client: OkHttpClient,
 ) : YoutubeMusicSearchSource {
     suspend fun audioUrl(videoId: String, quality: StreamQuality = StreamQuality.NORMAL): Result<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < 33) return@withContext Result.failure(UnsupportedOperationException("Use the bundled resolver on Android 12 and earlier"))
         try {
             ensureInitialized()
             Result.success(
@@ -36,6 +38,8 @@ class NewPipeYoutubeSource @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Result.failure(e)
+        } catch (e: LinkageError) {
             Result.failure(e)
         }
     }
@@ -58,6 +62,7 @@ class NewPipeYoutubeSource @Inject constructor(
     }
 
     suspend fun bestAudioUrl(videoId: String): Result<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < 33) return@withContext Result.failure(UnsupportedOperationException("Use the bundled resolver on Android 12 and earlier"))
         try {
             ensureInitialized()
             Result.success(
@@ -74,10 +79,16 @@ class NewPipeYoutubeSource @Inject constructor(
             throw e
         } catch (e: Exception) {
             Result.failure(e)
+        } catch (e: LinkageError) {
+            Result.failure(e)
         }
     }
 
     override suspend fun searchSongs(query: String): List<YoutubeCandidate> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        // NewPipe 0.27 uses URLEncoder.encode(String, Charset), introduced in API 33.
+        // Core-library desugaring does not supply java.net's newer overloads.
+        // Returning no candidates selects the already-bundled yt-dlp implementation.
+        if (Build.VERSION.SDK_INT < 33) return@withContext emptyList()
         try {
             ensureInitialized()
             val service = NewPipe.getService("YouTube")
@@ -93,6 +104,8 @@ class NewPipeYoutubeSource @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            emptyList()
+        } catch (_: LinkageError) {
             emptyList()
         }
     }

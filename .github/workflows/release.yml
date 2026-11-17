@@ -77,7 +77,7 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am instrument -w -e class com.gamut.UpgradeInstallTest#updatePreservesInstalledLibrary -e upgradePhase verify com.lukeherc.spotmusic.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-verify.txt
             python3 -c "from pathlib import Path; assert 'OK (1 test)' in Path('upgrade-verify.txt').read_text()"
-            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain -Pgamut.abis=x86_64 -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))" || (adb logcat -d -s TestRunner AndroidRuntime; exit 1)
+            bash ./gradlew --no-daemon :app:connectedDebugAndroidTest --console=plain -Pgamut.abis=x86_64 -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))" || (adb logcat -d -s TestRunner AndroidRuntime; adb shell uiautomator dump /sdcard/spot-failure.xml; adb exec-out cat /sdcard/spot-failure.xml; exit 1)
             adb exec-out cat /sdcard/spot-ui-home.png > ui-home.png
             adb exec-out cat /sdcard/spot-ui-search.png > ui-search.png
             adb exec-out cat /sdcard/spot-ui-podcasts.png > ui-podcasts.png
