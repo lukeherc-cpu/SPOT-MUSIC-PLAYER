@@ -7,7 +7,7 @@ import org.w3c.dom.Element
 
 /** RSS enclosures only: no embedded players, scripts, external XML entities or page scraping. */
 object PodcastFeedParser {
-    const val MAX_BYTES = 4_000_000
+    const val MAX_BYTES = 16_000_000
     fun parse(bytes: ByteArray, feedUrl: String): List<PodcastEpisode> {
         require(bytes.size <= MAX_BYTES) { "Podcast feed is too large" }
         require(!bytes.toString(Charsets.UTF_8).replace("\u0000", "").contains("<!DOCTYPE", ignoreCase = true)) { "Unsupported podcast feed" }
@@ -28,7 +28,7 @@ object PodcastFeedParser {
             val item = nodes.item(i) as? Element ?: return@mapNotNull null
             val enclosure = item.getElementsByTagName("enclosure").item(0) as? Element ?: return@mapNotNull null
             val type = enclosure.getAttribute("type").lowercase()
-            if (type.isNotBlank() && !type.startsWith("audio/") && type != "application/ogg") return@mapNotNull null
+            if (type.isNotBlank() && !type.startsWith("audio/") && type !in listOf("application/ogg", "application/octet-stream")) return@mapNotNull null
             val url = httpsUrl(enclosure.getAttribute("url"), feedUrl) ?: return@mapNotNull null
             val image = item.getElementsByTagNameNS("*", "image").item(0) as? Element
             PodcastEpisode(
@@ -46,6 +46,6 @@ object PodcastFeedParser {
         return parts.fold(0L) { total, n -> total * 60 + n }.times(1000).coerceAtMost(7 * 24 * 60 * 60_000L)
     }
     internal fun httpsUrl(raw: String, base: String): String? = runCatching {
-        URI(base).resolve(raw.trim()).takeIf { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null }?.toASCIIString()
+        URI(base).resolve(raw.trim()).let { if (it.scheme.equals("http", true)) URI("https", it.rawAuthority, it.path, it.query, it.fragment) else it }.takeIf { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null }?.toASCIIString()
     }.getOrNull()
 }

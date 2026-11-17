@@ -15,8 +15,8 @@ class PodcastFeedParserTest {
           <item><enclosure url="https://example.org/movie.mp4" type="video/mp4"/></item>
         </channel></rss>"""
         val episodes = PodcastFeedParser.parse(xml.toByteArray(), base)
-        assertEquals(1, episodes.size)
-        val ep = episodes.single()
+        assertEquals(2, episodes.size)
+        val ep = episodes.first()
         assertEquals("A & B", ep.title)
         assertEquals("Hello world", ep.description)
         assertEquals(3_723_000L, ep.durationMs)
@@ -31,6 +31,12 @@ class PodcastFeedParserTest {
         assertThrows(IllegalArgumentException::class.java) { PodcastFeedParser.parse(xml.toByteArray(), base) }
         assertThrows(IllegalArgumentException::class.java) { PodcastFeedParser.parse(xml.toByteArray(Charsets.UTF_16), base) }
         assertThrows(IllegalArgumentException::class.java) { PodcastFeedParser.parse(ByteArray(PodcastFeedParser.MAX_BYTES + 1), base) }
+    }
+    @Test fun acceptsLargeFeedsAndUpgradesLegacyHttpLinks() {
+        val padding = " ".repeat(4_100_000)
+        val xml = """<rss><channel>$padding<item><title>Legacy</title><enclosure url="http://cdn.example.org/audio.mp3?x=1&amp;y=2" type="application/octet-stream"/></item></channel></rss>"""
+        val episode = PodcastFeedParser.parse(xml.toByteArray(), base).single()
+        assertEquals("https://cdn.example.org/audio.mp3?x=1&y=2", episode.audioUrl)
     }
     @Test fun handlesMissingAndInvalidDurations() {
         assertEquals(0L, PodcastFeedParser.durationMs(""))

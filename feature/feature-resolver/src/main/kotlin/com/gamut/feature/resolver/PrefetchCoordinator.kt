@@ -42,6 +42,17 @@ class PrefetchCoordinator @Inject constructor(
         }
     }
 
+    private val savedMutex = kotlinx.coroutines.sync.Mutex()
+    fun prepareSaved(track: Track) {
+        if (track.source == com.gamut.core.model.TrackSource.PODCAST || track.isrc.startsWith("local:")) return
+        scope.launch {
+            savedMutex.lock()
+            try {
+                if (allowed()) resolve(track).onSuccess { audio.audioUrl(it.youtubeVideoId) }
+            } finally { savedMutex.unlock() }
+        }
+    }
+
     private fun allowed(): Boolean {
         if (!settings.state.value.preload) return false
         if (settings.state.value.preloadUnmeteredOnly && !settings.onUnmeteredNetwork()) return false

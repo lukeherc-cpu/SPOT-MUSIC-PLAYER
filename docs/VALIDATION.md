@@ -5,6 +5,9 @@ Tested locally on November 16, 2026, using JDK 21 and Android SDK 35.
 - `:app:assembleDebug` passes (universal APK).
 - `:app:assembleRelease -Pgamut.abis=arm64-v8a` passes locally; the APK signature verifies and both upstream license texts are bundled as assets.
 - `:app:assembleDebugAndroidTest` passes (instrumentation APK compiles).
+- Shared music/podcast search, Home shortcuts, Library podcast rows and theme text-color inheritance compile in both app and instrumentation APKs.
+- Private saved-source cache tests pass across restart, expiry and explicit invalidation.
+- Large feed and legacy HTTP-to-HTTPS upgrade tests pass. Live feeds pass for The Journal, Darknet Diaries, Hard Fork, 99% Invisible, Reply All and The Joe Rogan Experience.
 - `testDebugUnitTest` passes. Optional live tests are skipped unless `SPOT_LIVE_SMOKE=1` is set.
 - The live SpotAPI catalog smoke returned 25 results for “Daft Punk Get Lucky” in about 2.7 seconds from a cold session.
 - The live podcast check searched the directory, parsed a NASA publisher feed and read audio bytes from an enclosure. The latest check reached the first response bytes in about 0.9 seconds after feed selection.

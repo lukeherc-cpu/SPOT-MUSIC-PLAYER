@@ -63,8 +63,8 @@ data class CoverPalette(
             primary = Color(0xFF2B2D3A),
             secondary = Color(0xFF2B2D3A),
             tertiary = Color(0xFF2B2D3A),
-            accent = Color.White,
-            base = Color(0xFF0B0B0D),
+            accent = Color(0xFF1ED760),
+            base = Color(0xFF121212),
             flows = false,
         )
 

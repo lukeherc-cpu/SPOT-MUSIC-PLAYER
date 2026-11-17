@@ -1049,6 +1049,8 @@ private fun HomeTabs(
     val profileId by accountVm.userId.collectAsState()
     val avatar by accountVm.avatar.collectAsState()
     val favoriteIsrcs by libraryVm.favoriteIsrcs.collectAsState()
+    val podcastSearchState by podcastsVm.state.collectAsState()
+    val followedShows by podcastsVm.store.shows.collectAsState()
     val libraryPlaylists by libraryVm.playlists.collectAsState()
     val playlistInfo by libraryVm.playlistInfo.collectAsState()
     val tracksByPlaylist by libraryVm.tracksByPlaylist.collectAsState()
@@ -1097,7 +1099,15 @@ private fun HomeTabs(
                     SearchScreen(
                         viewModel = searchVm,
                         homeMode = tab == 0,
-                        onOpenPodcasts = { goTo(3) },
+                        onOpenPodcasts = { podcastsVm.back(); goTo(3) },
+                        onPodcastQuery = podcastsVm::search,
+                        podcastResults = podcastSearchState.shows.map { com.gamut.feature.search.PodcastSearchItem(it.feedUrl, it.title, it.author, it.artwork) },
+                        podcastsLoading = podcastSearchState.loading && podcastSearchState.selected == null,
+                        podcastError = podcastSearchState.error?.takeIf { podcastSearchState.selected == null },
+                        onPodcastSelected = { id -> podcastSearchState.shows.firstOrNull { it.feedUrl == id }?.let { podcastsVm.open(it); goTo(3) } },
+                        homeShortcuts = listOf(com.gamut.feature.search.HomeShortcut("Liked Songs", liked = true, open = { onOpenPlaylist("liked") })) +
+                            libraryPlaylists.take(3).map { playlist -> com.gamut.feature.search.HomeShortcut(playlist.name, playlist.coverUri ?: playlistInfo[playlist.id]?.coverUrl, open = { onOpenPlaylist(playlist.id.toString()) }) } +
+                            followedShows.take(4).map { show -> com.gamut.feature.search.HomeShortcut(show.title, show.artwork, podcast = true, open = { podcastsVm.open(show); goTo(3) }) },
                         resolvingIsrc = resolvingIsrc,
                         onTrackSelected = onTrackSelected,
                         onArtistSelected = onArtistSelected,
@@ -1124,6 +1134,11 @@ private fun HomeTabs(
                 TabLayer(page = 2, position = { position.value }, active = shownTab == 2) {
                     LibraryScreen(
                         artists = followedArtists,
+                        podcasts = followedShows.map { com.gamut.feature.library.LibraryPodcast(it.feedUrl, it.title, it.author, it.artwork) },
+                        onOpenPodcast = { id -> followedShows.firstOrNull { it.feedUrl == id }?.let { podcastsVm.open(it); goTo(3) } },
+                        onProfile = onProfile,
+                        profileName = profileName,
+                        profileImage = avatar,
                         artistsLoading = followedEntities == null,
                         onOpenArtist = { key ->
                             key.removePrefix("deezer:").toLongOrNull()?.let(onArtistSelected)

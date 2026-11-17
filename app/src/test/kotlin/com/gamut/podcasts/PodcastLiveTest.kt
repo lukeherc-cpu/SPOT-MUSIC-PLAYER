@@ -9,6 +9,16 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class PodcastLiveTest {
+    @Test fun commonPublisherFeeds() = runBlocking {
+        assumeTrue(System.getenv("SPOT_LIVE_SMOKE") == "1")
+        val repository = PodcastRepository()
+        for (name in listOf("The Journal", "Darknet Diaries", "Hard Fork", "99% Invisible", "Reply All", "The Joe Rogan Experience")) {
+            val show = repository.search(name).first()
+            val episodes = repository.episodes(show)
+            assertTrue("$name returned no playable episodes", episodes.isNotEmpty())
+            println("Publisher feed passed: $name (${episodes.size} episodes)")
+        }
+    }
     @Test fun livePublisherFeedAndAudio() = runBlocking {
         assumeTrue(System.getenv("SPOT_LIVE_SMOKE") == "1")
         val repository = PodcastRepository()

@@ -21,7 +21,7 @@ import okhttp3.Request
 @Singleton
 class PodcastRepository @Inject constructor() {
     // Feeds are untrusted input. Apply DNS restrictions to each feed request and redirect.
-    private val client = OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS)
+    private val client = OkHttpClient.Builder().callTimeout(35, TimeUnit.SECONDS)
         .followRedirects(false).dns(PublicPodcastDns).build()
     private val cache = object : LinkedHashMap<String, Pair<Long, List<PodcastEpisode>>>(16, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<PodcastEpisode>>>) = size > 20

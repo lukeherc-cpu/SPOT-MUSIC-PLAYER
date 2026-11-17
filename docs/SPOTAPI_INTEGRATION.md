@@ -11,3 +11,5 @@ Search providers publish independently so a cold Spotify session does not hold b
 SpotAPI's GPL-3.0 license is reproduced in `docs/licenses/SpotAPI-GPL-3.0.txt`. Gamut and this derivative application remain AGPL-3.0 under the root LICENSE. The About screen credits both upstream projects.
 
 Run the optional live catalog smoke test with `SPOT_LIVE_SMOKE=1 ./gradlew :core:core-network:testDebugUnitTest`; ordinary tests use recorded envelopes and fake providers without contacting Spotify.
+
+Resolved song-to-video IDs are retained in Room. Resolved audio URLs are also cached privately in the app's no-backup directory, capped at 500 entries and separated by audio quality. Signed URLs are reused only before their expiry with a two-minute margin; unknown expiry gets a twenty-minute lifetime. Player retries invalidate a failed URL and extract a fresh one. Saving a favorite or adding a song to a playlist warms its source when preloading/network/power settings allow. Downloaded audio keeps its existing persistent local file path and plays without extraction. Saving a song does not automatically download the full audio. These caches are excluded from library exports.

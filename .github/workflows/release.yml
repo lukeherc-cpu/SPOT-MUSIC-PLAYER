@@ -49,6 +49,7 @@ jobs:
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-home.png > ui-home.png
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-search.png > ui-search.png
             adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-podcasts.png > ui-podcasts.png
+            adb exec-out run-as com.lukeherc.spotmusic cat cache/ui-library.png > ui-library.png
       - name: Test and build
         run: |
           bash ./gradlew --no-daemon testDebugUnitTest --console=plain
@@ -65,12 +66,15 @@ jobs:
           cat > release-notes.md <<'NOTES'
           Android alpha of Spot Music, based on Gamut, with Spotify catalog discovery adapted from Aran404/SpotAPI.
 
-          - Dark green interface with Home, Search and Your Library.
+          - Spotify-style Home shortcuts, a white search field, readable text and Your Library rows.
+          - Shared music and podcast search with All, Music and Podcasts filters.
           - Podcast search, publisher RSS audio, followed shows, resume and 15-second seeking.
+          - Larger publisher feed support and HTTPS upgrades for legacy podcast links.
+          - Persistent, expiring audio source cache for faster repeat playback.
           - Progressive music search, earlier source prefetch and a smaller initial audio buffer.
 
           Install Spot-Music-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and the previous Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
           NOTES
-          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt ui-home.png ui-search.png ui-podcasts.png \
+          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
             --title "Spot Music Android alpha ${GITHUB_RUN_NUMBER}" --notes-file release-notes.md

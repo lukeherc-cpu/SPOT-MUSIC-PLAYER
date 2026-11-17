@@ -5,6 +5,7 @@ Android music and podcast player based on [Gamut by serptail](https://github.com
 No Real-Debrid account or separate server is needed. Music uses Gamut's existing source resolver and player. Spotify catalog search provides metadata; it does not supply Spotify audio. This fork is an Android app (Android 8+); the previous project's desktop/iOS implementation is not part of this codebase.
 
 - [SpotAPI integration and playback startup changes](docs/SPOTAPI_INTEGRATION.md)
+- Shared music/podcast search, saved playlist/show shortcuts, and a private expiring source cache for faster repeat playback.
 - [Podcast features and supported feeds](docs/PODCASTS.md)
 - Build: JDK 21, Android SDK 35, `bash ./gradlew :app:assembleDebug testDebugUnitTest`
 - Package: `com.lukeherc.spotmusic`, separate from official Gamut.

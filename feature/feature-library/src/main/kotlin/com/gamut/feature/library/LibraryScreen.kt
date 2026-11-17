@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Bold
+import com.adamglin.phosphoricons.bold.User
 import com.adamglin.phosphoricons.Fill
 import com.adamglin.phosphoricons.bold.CaretRight
 import com.adamglin.phosphoricons.bold.MagnifyingGlass
@@ -93,7 +94,9 @@ private val ButtonShape = RoundedCornerShape(8.dp)
 
 data class LibraryArtist(val id: String, val name: String, val imageUrl: String? = null)
 
-private enum class LibraryFilter(val label: String) { Playlists("Playlists"), Artists("Artists"), Offline("Offline") }
+data class LibraryPodcast(val id: String, val title: String, val author: String, val artwork: String?)
+
+private enum class LibraryFilter(val label: String) { Playlists("Playlists"), Podcasts("Podcasts"), Artists("Artists"), Offline("Offline") }
 
 @Composable
 fun LibraryScreen(
@@ -103,6 +106,11 @@ fun LibraryScreen(
     onCreatePlaylist: () -> Unit,
     barHeight: androidx.compose.ui.unit.Dp,
     artists: List<LibraryArtist> = emptyList(),
+    podcasts: List<LibraryPodcast> = emptyList(),
+    onOpenPodcast: (String) -> Unit = {},
+    onProfile: () -> Unit = {},
+    profileName: String? = null,
+    profileImage: Any? = null,
     artistsLoading: Boolean = false,
     onOpenArtist: (String) -> Unit = {},
     suggestedArtists: List<LibraryArtist> = emptyList(),
@@ -134,20 +142,26 @@ fun LibraryScreen(
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().statusBarsPadding().padding(bottom = barHeight)) {
                 Column(Modifier.weight(1f).fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(start = 24.dp + gutter, end = 24.dp + gutter, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp + gutter, end = 16.dp + gutter, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).pressScale(onClick = onProfile)) {
+                            com.gamut.core.designsystem.ProfileAvatar(name = profileName, seed = profileName, size = 34.dp, guestIcon = PhosphorIcons.Bold.User, image = profileImage)
+                        }
                         Text(
-                            "Library",
+                            "Your Library",
                             style = MaterialTheme.typography.displayLarge,
                             color = TextPrimary,
                             modifier = Modifier.weight(1f),
                         )
+                        Box(Modifier.size(40.dp).pressScale(onClick = onOpenSearch), contentAlignment = Alignment.Center) {
+                            Icon(PhosphorIcons.Bold.MagnifyingGlass, "Search library", tint = ink(), modifier = Modifier.size(24.dp))
+                        }
                         Box(Modifier.size(44.dp).pressScale(onClick = onCreatePlaylist), contentAlignment = Alignment.Center) {
                             Icon(PhosphorIcons.Bold.Plus, "Create playlist", tint = ink(0.85f), modifier = Modifier.size(24.dp))
                         }
                     }
 
                     Row(
-                        Modifier.fillMaxWidth().padding(start = 24.dp + gutter, end = 24.dp + gutter, top = 14.dp),
+                        Modifier.fillMaxWidth().padding(start = 16.dp + gutter, end = 16.dp + gutter, top = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -165,7 +179,10 @@ fun LibraryScreen(
                         }
                     }
 
-                    if (selectedTrack != null) ReadyToAddCard(selectedTrack, Modifier.padding(horizontal = 24.dp + gutter).padding(top = 12.dp))
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp + gutter, vertical = 16.dp)) {
+                        Text("Recents", style = MaterialTheme.typography.labelLarge, color = TextPrimary)
+                    }
+                    if (selectedTrack != null) ReadyToAddCard(selectedTrack, Modifier.padding(horizontal = 16.dp + gutter).padding(top = 12.dp))
 
                     LazyVerticalGrid(
                         columns = when {
@@ -173,14 +190,19 @@ fun LibraryScreen(
                             else -> GridCells.Fixed(if (isGrid) 3 else 1)
                         },
                         modifier = Modifier.weight(1f).fadeEdges(),
-                        contentPadding = PaddingValues(start = 24.dp + gutter, end = 24.dp + gutter, top = 6.dp, bottom = 24.dp),
+                        contentPadding = PaddingValues(start = 16.dp + gutter, end = 16.dp + gutter, top = 6.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(if (isGrid) 18.dp else 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        if (filter == null) item(key = "podcasts", span = fullSpan) {
+                        if (filter == null || filter == LibraryFilter.Podcasts) item(key = "podcasts", span = fullSpan) {
                             LibraryRow(title = "Your podcasts", onClick = onOpenPodcasts,
                                 meta = { Text("Followed shows and episodes", color = TextSecondary, style = MaterialTheme.typography.bodyMedium) },
                                 cover = { RowCover(null, PhosphorIcons.Bold.MusicNoteSimple) })
+                        }
+                        if (filter == null || filter == LibraryFilter.Podcasts) items(podcasts, key = { "show-${it.id}" }, contentType = { "podcast" }) { podcast ->
+                            LibraryRow(title = podcast.title, onClick = { onOpenPodcast(podcast.id) },
+                                meta = { Text("Podcast · ${podcast.author}", color = TextSecondary, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                cover = { RowCover(podcast.artwork, PhosphorIcons.Bold.MusicNoteSimple) }, trailing = {})
                         }
                         if (showOffline) {
                             if (downloaded.isEmpty()) {
@@ -217,10 +239,11 @@ fun LibraryScreen(
                         if (showPlaylists) {
                             item(key = "liked") {
                                 if (isGrid) {
-                                    GridCell("Liked songs", { onOpenPlaylist("liked") }, offline = likedOffline) { TileCover(null, PhosphorIcons.Fill.Heart) }
+                                    GridCell("Liked Songs", { onOpenPlaylist("liked") }, offline = likedOffline) { TileCover(null, PhosphorIcons.Fill.Heart) }
                                 } else {
                                     LibraryRow(
-                                        title = "Liked songs",
+                                        title = "Liked Songs",
+                                        meta = { Text("Playlist · Saved songs", color = TextSecondary, style = MaterialTheme.typography.bodyMedium) },
                                         onClick = { onOpenPlaylist("liked") },
                                         cover = { RowCover(null, PhosphorIcons.Fill.Heart) },
                                         offline = likedOffline,
@@ -434,11 +457,11 @@ private fun RowCover(coverUrl: String?, icon: ImageVector, circle: Boolean = fal
     if (!coverUrl.isNullOrBlank()) {
         CoverImage(
             remember(coverUrl) { resolveCoverUrl(coverUrl, 200) },
-            Modifier.size(58.dp).then(if (circle) Modifier.clip(CircleShape) else Modifier.softCover()),
+            Modifier.size(64.dp).then(if (circle) Modifier.clip(CircleShape) else Modifier.softCover()),
         )
     } else {
         Box(
-            Modifier.size(58.dp).then(if (circle) Modifier.clip(CircleShape) else Modifier.softCover()).background(flatCoverFill()),
+            Modifier.size(64.dp).then(if (circle) Modifier.clip(CircleShape) else Modifier.softCover()).background(if (icon == PhosphorIcons.Fill.Heart) androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF4C18D6), Color(0xFFBFE6D7))) else androidx.compose.ui.graphics.Brush.linearGradient(listOf(flatCoverFill(), flatCoverFill()))),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, null, tint = ink(), modifier = Modifier.size(28.dp))
@@ -494,7 +517,7 @@ private fun LibraryRow(
     ) {
         cover()
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (meta != null) {
                 Spacer(Modifier.height(5.dp))
                 meta()

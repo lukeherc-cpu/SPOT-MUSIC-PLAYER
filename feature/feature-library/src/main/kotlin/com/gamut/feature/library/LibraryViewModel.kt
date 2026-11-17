@@ -54,6 +54,7 @@ data class PlaylistInfo(val coverUrl: String?, val songCount: Int, val offline: 
 class LibraryViewModel @Inject constructor(
     private val repository: LibraryRepository,
     private val downloadIndex: DownloadIndex,
+    private val prefetch: com.gamut.feature.resolver.PrefetchCoordinator,
     private val trackDao: com.gamut.core.database.TrackDao,
 ) : ViewModel() {
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -119,6 +120,7 @@ class LibraryViewModel @Inject constructor(
                     return@withLock
                 }
                 repository.appendTrack(playlistId, track)
+                prefetch.prepareSaved(track)
             }
         }
     }
@@ -170,7 +172,11 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun toggleFavorite(track: Track) {
-        viewModelScope.launch { repository.toggleFavorite(track) }
+        val adding = track.isrc !in favoriteIsrcs.value
+        viewModelScope.launch {
+            repository.toggleFavorite(track)
+            if (adding) prefetch.prepareSaved(track)
+        }
     }
 }
 

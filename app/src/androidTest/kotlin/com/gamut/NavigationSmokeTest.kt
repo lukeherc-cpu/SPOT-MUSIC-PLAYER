@@ -38,14 +38,25 @@ class NavigationSmokeTest {
             device.findObject(By.text("Podcasts")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Your shows")), 10_000))
             assertNotNull(device.findObject(By.text("Search podcasts")))
-            device.takeScreenshot(File(context.cacheDir, "ui-podcasts.png"))
+            val podcastScreenshot = File(context.cacheDir, "ui-podcasts.png")
+            device.takeScreenshot(podcastScreenshot)
+            val bitmap = android.graphics.BitmapFactory.decodeFile(podcastScreenshot.absolutePath)
+            val bounds = device.findObject(By.text("Your shows")).visibleBounds
+            var bright = 0
+            for (y in bounds.top until bounds.bottom) for (x in bounds.left until bounds.right) {
+                val pixel = bitmap.getPixel(x, y)
+                if (android.graphics.Color.red(pixel) > 180 && android.graphics.Color.green(pixel) > 180 && android.graphics.Color.blue(pixel) > 180) bright++
+            }
+            bitmap.recycle()
+            assertTrue("Podcast heading must be readable against the dark background", bright > 20)
             device.findObjects(By.text("Search")).maxBy { node -> node.visibleBounds.bottom }.click()
-            assertTrue(device.wait(Until.hasObject(By.text("Artists, songs, albums")), 10_000))
+            assertTrue(device.wait(Until.hasObject(By.text("What do you want to listen to?")), 10_000))
             scenario.onActivity { activity -> activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(activity.window.decorView.windowToken, 0) }
             device.waitForIdle()
             device.takeScreenshot(File(context.cacheDir, "ui-search.png"))
-            device.findObject(By.text("Your Library")).click()
+            device.findObjects(By.text("Your Library")).maxBy { node -> node.visibleBounds.bottom }.click()
             assertTrue(device.wait(Until.hasObject(By.text("Your podcasts")), 10_000))
+            device.takeScreenshot(File(context.cacheDir, "ui-library.png"))
             device.findObject(By.text("Your podcasts")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Your shows")), 10_000))
         }

@@ -11,6 +11,8 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -91,8 +93,8 @@ private val GamutDarkColors = darkColorScheme(
     secondary = GamutAccentB,
     secondaryContainer = GamutAccentA,
     onSecondaryContainer = Color.Black,
-    background = Color(0xFF0B0B0D),
-    surface = Color(0xFF16161A),
+    background = Color(0xFF121212),
+    surface = Color(0xFF181818),
     onBackground = Color(0xFFF2F2F5),
     onSurface = Color(0xFFF2F2F5),
     error = Color(0xFFFF7A8E),
@@ -100,7 +102,10 @@ private val GamutDarkColors = darkColorScheme(
 
 @Composable
 fun GamutTheme(dark: Boolean = false, content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) GamutDarkColors else GamutColors, typography = GamutTypography, content = content)
+    val scheme = if (dark) GamutDarkColors else GamutColors
+    MaterialTheme(colorScheme = scheme, typography = GamutTypography) {
+        CompositionLocalProvider(LocalContentColor provides scheme.onBackground, content = content)
+    }
 }
 
 @Composable
