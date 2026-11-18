@@ -10,7 +10,7 @@ The player has a fixed layout and a square cover/text slot. Tapping the art perf
 
 Podcasting 2.0 VTT, SRT, JSON and plain-text transcripts are preferred. If a publisher supplies none, or its text cannot be retrieved, bundled multilingual Whisper Tiny generates timed subtitles automatically on the device. Android decodes bounded windows ahead of playback with MediaCodec; desktop bundles its audio decoder and native recognizer. Generated cues and processed windows are saved for future plays and seeks. No microphone access or transcription server is used. Automatic text can contain recognition mistakes and takes processing time on first playback; silence is skipped, and plain publisher text is never given invented timestamps.
 
-The artist rail occupies the middle of the right edge, with a spring-driven thumb indicator, curved label movement and a floating section label inspired by the supplied Niagara recording. Artist credit popups load and cache profile photos. Song rows support left-swipe queueing and long-press menus with contextual local-playlist removal. Shuffle keeps its setting and selects a random collection starting track; explicitly tapped songs remain the starting song.
+On Android, the artist rail occupies the middle of the right edge, with a spring-driven thumb indicator, curved label movement and a floating section label inspired by the supplied Niagara recording. Artist credit popups load and cache profile photos. Song rows support left-swipe queueing and long-press menus with contextual local-playlist removal. Shuffle keeps its setting and selects a random collection starting track; explicitly tapped songs remain the starting song.
 
 The cover flip and mini-player container transform adapt ReadAlong's GPL-3.0 player interactions at commit 6e708f88581b93a50bcd6285d2f1589b338ea655. Its source and license are credited in Settings and `docs/licenses/ReadAlong-GPL-3.0.txt`:
 - https://github.com/readalongapp/ReadAlong/blob/6e708f88581b93a50bcd6285d2f1589b338ea655/app/src/main/java/com/example/readalong/ui/player/PlayerScreen.kt
@@ -24,7 +24,7 @@ Android verifies package identity, version code and signing identity when updati
 | --- | --- |
 | Local APK from this chat | `c9ae87a69f11c3e4852f64aaac4c32d7bb2891b09fc1883ea2d378314576a0e0` |
 
-Alpha 12 uses version code 10012 and package `com.lukeherc.spotmusic`, matching the retained local APK family. Settings shows the signing identity.
+Release APKs use package `com.lukeherc.spotmusic` and increasing version codes, with the retained signing key matching the earlier local APK family. Settings shows the signing identity.
 
 The old GitHub workflow cached a path that did not exist. Its logs confirm the key was never saved; public alphas 5, 6 and 8 have different certificates. Those private keys are unavailable, so an in-place update of those APKs cannot be signed. A certificate extracted from an APK cannot replace its private key. Keep a legacy installation installed if its library is needed.
 
