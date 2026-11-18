@@ -17,19 +17,19 @@ export function secureUrl(value) {
   if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error('Only public HTTPS publisher URLs are supported.');
   return u;
 }
-export async function publicRequest(raw,{range,headers={},family,redirects=5}={}) {
+export async function publicRequest(raw,{range,headers={},family,redirects=5,signal}={}) {
   const u=secureUrl(raw);
   const addresses=await lookup(u.hostname,{all:true,...(family?{family}:{})});
   if(!addresses.length||addresses.some(x=>!publicAddress(x.address)))throw Error('Publisher address is not public.');
   const response=await new Promise((resolve,reject)=> {
-    const request=https.get(u,{headers:{'User-Agent':'SpotMusic/0.2 PodcastPlayer',...headers,...(range?{Range:range}:{})},lookup:(_host,options,callback)=> {
+    const request=https.get(u,{signal,headers:{'User-Agent':'SpotMusic/0.2 PodcastPlayer',...headers,...(range?{Range:range}:{})},lookup:(_host,options,callback)=> {
       if(options.all)callback(null,addresses);else callback(null,addresses[0].address,addresses[0].family);
     }},resolve);
     request.setTimeout(35000,()=>request.destroy(Error('Publisher timed out.'))); request.on('error',reject);
   });
   if([301,302,303,307,308].includes(response.statusCode)) {
     response.resume(); if(redirects<=0)throw Error('Too many publisher redirects.');
-    return publicRequest(new URL(response.headers.location,u).href,{range,headers,family,redirects:redirects-1});
+    return publicRequest(new URL(response.headers.location,u).href,{range,headers,family,redirects:redirects-1,signal});
   }
   return response;
 }

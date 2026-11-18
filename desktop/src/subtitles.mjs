@@ -2,13 +2,41 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
-import {lookup} from 'node:dns/promises';
+import {createServer} from 'node:http';
 import path from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
-import {readPublic,secureUrl,publicAddress} from './public-network.mjs';
+import {readPublic,secureUrl,publicRequest} from './public-network.mjs';
 import {episodes} from './podcasts.mjs';
 
 const run=promisify(execFile),WINDOW=20000;
+// Native static decoders can crash in host DNS/TLS libraries. Node owns validated
+// publisher HTTPS and redirects; the decoder receives a private loopback URL with
+// byte ranges intact, so seeking never requires downloading the whole episode.
+export async function decoderInput(source,signal,request=publicRequest){
+  if(path.isAbsolute(source))return{url:source,close:async()=>{}};
+  const publisher=secureUrl(source).href,token='/'+randomUUID(),controller=new AbortController();
+  signal.throwIfAborted();
+  const server=createServer(async(incoming,response)=>{
+    if(incoming.url!==token){response.writeHead(404).end();return;}
+    if(!['GET','HEAD'].includes(incoming.method)){response.writeHead(405).end();return;}
+    const range=incoming.headers.range;
+    if(range&&!/^bytes=\d*-\d*$/.test(range)){response.writeHead(416).end();return;}
+    let upstream;
+    try{
+      upstream=await request(publisher,{range,headers:{'Accept-Encoding':'identity'},signal:controller.signal});
+      if(response.destroyed){upstream.destroy();return;}
+      const headers={};for(const name of ['content-type','content-length','content-range','accept-ranges'])if(upstream.headers[name])headers[name]=upstream.headers[name];
+      response.writeHead(upstream.statusCode||502,headers);
+      response.on('close',()=>upstream.destroy());upstream.on('error',()=>response.destroy());
+      if(incoming.method==='HEAD'){upstream.destroy();response.end();}else upstream.pipe(response);
+    }catch{upstream?.destroy();if(!response.destroyed){if(response.headersSent)response.destroy();else response.writeHead(502).end();}}
+  });
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+  const abort=()=>{controller.abort();server.closeAllConnections();};
+  signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
+  let closed=false;
+  return{url:`http://127.0.0.1:${server.address().port}${token}`,close:async()=>{if(closed)return;closed=true;signal.removeEventListener('abort',abort);abort();await new Promise(resolve=>server.close(resolve));}};
+}
 export function parseTranscript(raw,type='text/vtt'){
   if(Buffer.byteLength(raw)>6e6)throw Error('Transcript is too large.');
   const clean=s=>String(s||'').replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').trim();
@@ -33,7 +61,7 @@ export function wavInfo(bytes){
   return{durationMs:data.length/32,energy:energy/(data.length/2||1)};
 }
 export class SubtitleEngine{
-  constructor(directory,resources,sourceFor=async track=>track.directAudioUrl){this.directory=directory;this.resources=resources;this.sourceFor=sourceFor;this.state={trackId:'',cues:[],working:false};this.position=0;this.serial=0;}
+  constructor(directory,resources,sourceFor=async track=>track.directAudioUrl,request=publicRequest){this.directory=directory;this.resources=resources;this.sourceFor=sourceFor;this.request=request;this.state={trackId:'',cues:[],working:false};this.position=0;this.serial=0;}
   snapshot(){return structuredClone(this.state);}
   start(track,position=0){if(this.state.trackId===track.isrc){this.position=position;return this.snapshot();}this.stop();const serial=this.serial;this.position=position;this.state={trackId:track.isrc,cues:[],working:true,timed:true,generated:false};this.controller=new AbortController();this.task=this.prepare(track,serial,this.controller.signal).catch(error=>{if(serial===this.serial&&!this.controller.signal.aborted)this.state={...this.state,working:false,error:'Could not generate subtitles for this audio. Playback can continue.'};});return this.snapshot();}
   stop(){this.serial++;this.controller?.abort();this.state={trackId:'',cues:[],working:false};}
@@ -54,7 +82,7 @@ export class SubtitleEngine{
     if(serial!==this.serial)return;
     if(published){this.state={trackId:track.isrc,...published,generated:false,working:false};return;}
     const source=await this.sourceFor(track),remote=!path.isAbsolute(source);
-    if(remote){const u=secureUrl(source);const addresses=await lookup(u.hostname,{all:true});if(!addresses.length||addresses.some(x=>!publicAddress(x.address)))throw Error('Unsupported podcast address.');}
+    if(remote)secureUrl(source);
     const exe=name=>path.join(this.resources,name+(process.platform==='win32'?'.exe':''));
     const model=path.join(this.resources,'ggml-tiny-q5_1.bin'),windows=new Set(cached.windows||[]),cues=cached.cues||[];
     let language=cached.language||'auto',endAt=track.durationMs||Infinity;
@@ -65,7 +93,8 @@ export class SubtitleEngine{
       const temporary=path.join(this.directory,'.work-'+randomUUID());await mkdir(temporary);
       try{
         const wav=path.join(temporary,'audio.wav'),out=path.join(temporary,'words');
-        await run(exe('ffmpeg'),['-hide_banner','-loglevel','error','-nostdin','-protocol_whitelist',remote?'http,https,tcp,tls,crypto':'file,crypto',...(remote?['-rw_timeout','15000000']:[]),'-ss',String(next/1000),'-i',source,'-t',String(WINDOW/1000),'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le','-y',wav],{timeout:60000,maxBuffer:2e6,windowsHide:true,signal});
+        const input=await decoderInput(source,signal,this.request);
+        try{await run(exe('ffmpeg'),['-hide_banner','-loglevel','error','-nostdin','-protocol_whitelist',remote?'http,tcp':'file,crypto',...(remote?['-rw_timeout','15000000']:[]),'-ss',String(next/1000),'-i',input.url,'-t',String(WINDOW/1000),'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le','-y',wav],{timeout:60000,maxBuffer:2e6,windowsHide:true,signal});}finally{await input.close();}
         if((await stat(wav)).size>1e6)throw Error('Unexpected decoded audio size.');
         const info=wavInfo(await readFile(wav));
         if(info.durationMs<WINDOW-1000)endAt=next+info.durationMs;

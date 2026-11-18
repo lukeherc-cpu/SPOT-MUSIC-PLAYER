@@ -9,7 +9,24 @@ import {publicAddress} from '../src/public-network.mjs';
 import {Store} from '../src/store.mjs';
 import {Resolver,rewriteManifest} from '../src/resolver.mjs';
 import {recommendations,browse,albumForTrack,US,seedArtists} from '../src/discovery.mjs';
-import {parseTranscript,cleanVersion,cleanLyricText} from '../src/subtitles.mjs';
+import {parseTranscript,cleanVersion,cleanLyricText,decoderInput} from '../src/subtitles.mjs';
+import {Readable} from 'node:stream';
+import {get} from 'node:http';
+
+test('speech transport preserves byte ranges and hides publisher URLs behind an expiring local route',async()=>{
+  const controller=new AbortController(),calls=[];
+  const input=await decoderInput('https://publisher.example/audio.mp3',controller.signal,async(url,options)=>{
+    calls.push({url,range:options.range});const stream=Readable.from(Buffer.from('2345'));stream.statusCode=206;stream.headers={'content-type':'audio/mpeg','content-length':'4','content-range':'bytes 2-5/10','accept-ranges':'bytes'};return stream;
+  });
+  const request=(url,headers={})=>new Promise((resolve,reject)=>{get(url,{headers},response=>{const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve({status:response.statusCode,headers:response.headers,text:Buffer.concat(chunks).toString()}));response.on('error',reject);}).on('error',reject);});
+  try{
+    assert.equal(new URL(input.url).hostname,'127.0.0.1');assert.equal(input.url.includes('publisher.example'),false);
+    const response=await request(input.url,{Range:'bytes=2-5'});assert.equal(response.status,206);assert.equal(response.text,'2345');assert.equal(response.headers['content-range'],'bytes 2-5/10');assert.deepEqual(calls,[{url:'https://publisher.example/audio.mp3',range:'bytes=2-5'}]);
+    assert.equal((await request(new URL('/wrong-token',input.url))).status,404);
+    assert.equal((await request(input.url,{Range:'bytes=0-1,3-4'})).status,416);assert.equal(calls.length,1);
+  }finally{await input.close();}
+  await assert.rejects(()=>request(input.url));
+});
 
 test('publisher subtitles keep their real timestamps and clean lyrics mask explicit words',()=>{
   const parsed=parseTranscript('WEBVTT\n\n00:00:01.200 --> 00:00:03.500\nHello world\n');
@@ -45,6 +62,8 @@ test('podcast parsing handles enclosures, upgrades HTTP, deduplicates and reject
   const show={title:'Show',feedUrl:'https://example.org/feed.xml'};
   const xml='<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel><item><guid>one</guid><title>Episode</title><itunes:duration>1:30</itunes:duration><enclosure url="http://example.org/audio.mp3" type="audio/mpeg"/></item><item><guid>one</guid><enclosure url="http://example.org/audio.mp3"/></item><item><enclosure url="https://example.org/video.mp4" type="video/mp4"/></item></channel></rss>';
   const episodes=parseFeed(xml,show);assert.equal(episodes.length,1);assert.equal(episodes[0].durationMs,90000);assert.equal(episodes[0].directAudioUrl,'https://example.org/audio.mp3');
+  const repeated=parseFeed(xml.replace('<title>Episode</title>','<title>Coral reef story</title><itunes:title>Coral reef story</itunes:title>').replace('<itunes:duration>1:30</itunes:duration>','<duration>1:30</duration><itunes:duration>1:30</itunes:duration>'),show);
+  assert.equal(repeated[0].title,'Coral reef story');assert.equal(repeated[0].durationMs,90000);
   assert.throws(()=>parseFeed('<!DOCTYPE x [<!ENTITY ext SYSTEM "file:///secret">]><rss/>',show));
 });
 test('publisher requests reject loopback, private and mapped private addresses',()=>{

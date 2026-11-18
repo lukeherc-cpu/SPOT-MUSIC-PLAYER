@@ -3,8 +3,8 @@ import { XMLParser } from 'fast-xml-parser';
 import { readPublic, secureUrl } from './public-network.mjs';
 
 const list=x=>x==null?[]:Array.isArray(x)?x:[x];
-const plain=x=>String(typeof x==='object'?x?.['#text']||'':x||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
-function milliseconds(raw){const parts=String(raw||'').split(':').map(Number);return parts.every(Number.isFinite)?parts.reduce((a,n)=>a*60+n,0)*1000:0;}
+const plain=x=>Array.isArray(x)?x.map(plain).find(Boolean)||'':String(typeof x==='object'?x?.['#text']||'':x||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+function milliseconds(raw){const parts=plain(raw).split(':').map(Number);return parts.every(Number.isFinite)?parts.reduce((a,n)=>a*60+n,0)*1000:0;}
 export function parseFeed(xml,show) {
   if(Buffer.byteLength(xml)>16*1024*1024 || /<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('Unsupported podcast feed.');
   const root=new XMLParser({ignoreAttributes:false,attributeNamePrefix:'',removeNSPrefix:true,processEntities:false}).parse(xml);

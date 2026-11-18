@@ -1,5 +1,8 @@
 Desktop alpha for Windows, macOS and Linux.
 
+- Fixes Linux subtitle generation from streamed podcasts by keeping publisher HTTPS and byte-range requests in the app's validated network transport.
+- Handles repeated RSS/iTunes title and duration fields, including NPR feeds.
+
 - Automatic offline podcast subtitles with bundled multilingual Whisper Tiny when publisher text is missing. Generated cues are timed and cached; first-play processing takes time and recognition may contain errors.
 - Tap cover art for lyrics or subtitles, expand the text to full screen, and tap text to return to the cover without seeking.
 - Clean-version lyric filtering, skeleton content loading and randomized shuffle starting songs.
