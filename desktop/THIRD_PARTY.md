@@ -10,3 +10,8 @@ Spot Music is based on serptail/Gamut (AGPL-3.0). The native Spotify catalog ada
 - hls.js: https://github.com/video-dev/hls.js — BSD-2-Clause; its license is bundled. HLS manifests, keys and segments are served through opaque app URLs and verified public HTTPS requests.
 
 The app has no torrent client and needs no separate server. Anonymous Spotify browsing cannot access private playlists or Spotify's account-specific Daily Mixes. Spot Music builds its own mixes from locally stored listening history and public Spotify metadata.
+# Offline subtitles
+
+Whisper Tiny model weights are MIT licensed by OpenAI. whisper.cpp v1.9.5 is MIT licensed by the ggml authors. Both licenses are bundled in the application. The model and native source downloads are pinned and SHA256 verified by `scripts/prepare_speech.py`.
+
+The FFmpeg decoder comes from the checksum-pinned platform assets of [ffmpeg-static b6.1.1](https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1). The platform's exact license, build attribution and source locations are retained alongside the decoder as `speech/FFmpeg-LICENSE.txt` and `speech/FFmpeg-README.txt`. Different platforms may carry different FFmpeg builds; b6.1.1 identifies the binary distribution, not FFmpeg's own version.

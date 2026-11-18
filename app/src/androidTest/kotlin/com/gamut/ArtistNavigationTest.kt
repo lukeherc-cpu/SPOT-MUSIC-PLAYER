@@ -30,6 +30,8 @@ class ArtistNavigationTest {
             val overview = device.findObject(By.desc("Overview artist section")).visibleBounds
             val latest = device.findObject(By.desc("Latest artist section")).visibleBounds
             assertTrue(overview.centerX() > device.displayWidth * .8)
+            assertTrue("Rail should occupy the middle of the screen", overview.top > device.displayHeight * .15)
+            assertTrue("Rail should leave space below", latest.bottom < device.displayHeight * .9)
             device.swipe(overview.centerX(), overview.centerY(), latest.centerX(), latest.centerY(), 24)
             assertTrue(device.wait(Until.hasObject(By.text("Latest releases")), 5000))
             device.findObject(By.desc("Albums artist section")).click()

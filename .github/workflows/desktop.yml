@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'desktop/**'
+      - 'scripts/prepare_speech.py'
       - '.github/workflows/desktop.yml'
       - 'docs/licenses/**'
       - 'LICENSE'
@@ -70,12 +71,17 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install pinned dependencies and Electron
         run: |
           npm ci --no-audit --no-fund
           npx --no install-electron --no
       - name: Bundle verified audio resolver and application icon
         run: npm run prepare:resolver
+      - name: Bundle offline Whisper Tiny, native recognizer and audio decoder
+        run: python3 ../scripts/prepare_speech.py --desktop --platform ${{ matrix.target == 'mac' && 'darwin' || matrix.target == 'win' && 'win32' || 'linux' }} --arch ${{ matrix.arch }}
       - name: Unit checks
         run: npm test
       - name: Desktop navigation and local audio playback
@@ -102,6 +108,9 @@ jobs:
         env:
           EXPECTED_DESKTOP_VERSION: 0.2.0-alpha.${{ github.run_number }}
         run: node scripts/check-apple-silicon.mjs
+      - name: Verify packaged offline speech recognition with real audio
+        if: matrix.cross != true
+        run: node scripts/speech-smoke.mjs
       - name: Publish installers, checksums and UI previews
         env:
           GH_TOKEN: ${{ github.token }}

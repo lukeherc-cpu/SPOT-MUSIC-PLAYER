@@ -1,6 +1,9 @@
 package com.gamut.spot
 
 import androidx.compose.foundation.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -19,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,13 +39,15 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
     val follows by vm.followedArtists.collectAsState()
     val info = detail.spotify?.artistInfo
     val albums = detail.spotify?.albums.orEmpty()
+    val headerHeight by animateDpAsState(if (selected == 0) 280.dp else 190.dp, tween(240), label = "artist header")
     Row(Modifier.fillMaxSize().background(Black).statusBarsPadding()) {
         val scroll = rememberLazyListState()
         LaunchedEffect(selected) { scroll.scrollToItem(0) }
         LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
-                Box(Modifier.fillMaxWidth().height(if (selected == 0) 280.dp else 190.dp)) {
-                    SArt(info?.header ?: detail.artwork, Modifier.fillMaxSize())
+                Box(Modifier.fillMaxWidth().height(headerHeight)) {
+                    if (detail.loading && detail.artwork == null) SkeletonPulse(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize().background(Card)) }
+                    else SArt(info?.header ?: detail.artwork, Modifier.fillMaxSize())
                     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .12f), Color.Transparent, Black))))
                     SIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack)
                     Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
@@ -53,7 +59,7 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(onClick = { vm.followArtist(detail) }, shape = CircleShape) { Text(if (detail.key in follows) "Following" else "Follow", color = Color.White) }
                     Spacer(Modifier.weight(1f))
-                    FilledIconButton(onClick = { detail.tracks.firstOrNull()?.let { vm.play(it, detail.tracks) } }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(54.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play artist", Modifier.size(32.dp)) }
+                    FilledIconButton(onClick = { vm.playCollection(detail.tracks) }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(54.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play artist", Modifier.size(32.dp)) }
                 }
             }
             if (detail.loading) item { DiscoverySkeleton() }
@@ -99,7 +105,9 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
                 }
             }
         }
-        RightArtistTabs(listOf("Overview", "Songs", "Albums", "Latest"), selected) { selected = it }
+        Box(Modifier.width(48.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            RightArtistTabs(listOf("Overview", "Songs", "Albums", "Latest"), selected) { selected = it }
+        }
     }
 }
 
@@ -107,18 +115,32 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
 private fun RightArtistTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     var height by remember { mutableIntStateOf(1) }
     val select by rememberUpdatedState(onSelect)
-    Column(Modifier.width(48.dp).fillMaxHeight().onSizeChanged { height = it.height.coerceAtLeast(1) }
+    var dragY by remember { mutableStateOf<Float?>(null) }
+    val indicator by animateFloatAsState(dragY ?: ((selected + .5f) * height / labels.size), spring(stiffness = Spring.StiffnessMediumLow), label = "artist thumb")
+    Box(Modifier.width(48.dp).fillMaxHeight(.56f).heightIn(max = 360.dp).onSizeChanged { height = it.height.coerceAtLeast(1) }
         .semantics { contentDescription = "Artist sections, drag to browse" }
         .pointerInput(labels) {
-            fun choose(y: Float) { select((y / height * labels.size).toInt().coerceIn(0, labels.lastIndex)) }
-            detectDragGestures(onDragStart = { choose(it.y) }) { change, _ -> change.consume(); choose(change.position.y) }
+            fun choose(y: Float) { dragY = y.coerceIn(0f, height.toFloat()); select((y / height * labels.size).toInt().coerceIn(0, labels.lastIndex)) }
+            detectDragGestures(onDragStart = { choose(it.y) }, onDragEnd = { dragY = null }, onDragCancel = { dragY = null }) { change, _ -> change.consume(); choose(change.position.y) }
         }) {
-        labels.forEachIndexed { index, label ->
-            Box(Modifier.weight(1f).fillMaxWidth().clickable { onSelect(index) }.semantics { this.selected = selected == index; contentDescription = "$label artist section" }, contentAlignment = Alignment.Center) {
-                if (selected == index) Box(Modifier.align(Alignment.CenterEnd).width(3.dp).fillMaxHeight(.55f).background(Green, CircleShape))
-                Text(label, color = if (selected == index) Color.White else Muted.copy(alpha = .65f), style = MaterialTheme.typography.titleMedium, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false,
-                    modifier = Modifier.layout { measurable, _ -> val p = measurable.measure(Constraints()); layout(p.height, p.width) { p.place((p.height - p.width) / 2, (p.width - p.height) / 2) } }.rotate(-90f))
+        AnimatedVisibility(visible = dragY != null, enter = fadeIn(tween(100)) + scaleIn(initialScale = .8f), exit = fadeOut(tween(140)),
+            modifier = Modifier.offset { IntOffset(-120.dp.roundToPx(), (indicator - 22.dp.roundToPx()).toInt()) }) {
+            Box(Modifier.width(116.dp).height(44.dp).background(Card, RoundedCornerShape(22.dp)).border(1.dp, Green.copy(alpha = .5f), RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
+                Text(labels[selected], color = Color.White, style = MaterialTheme.typography.titleMedium)
             }
+        }
+        Box(Modifier.align(Alignment.TopEnd).width(3.dp).height(28.dp).offset { IntOffset(0, (indicator - 14.dp.roundToPx()).toInt()) }.background(Green, CircleShape))
+        Column(Modifier.fillMaxSize()) {
+        labels.forEachIndexed { index, label ->
+            val color by animateColorAsState(if (selected == index) Color.White else Muted.copy(alpha = .65f), tween(160), label = "artist section color")
+            val distance = kotlin.math.abs((index + .5f) * height / labels.size - (dragY ?: indicator)) / (height.toFloat() / labels.size)
+            val wave = if (dragY == null) 0f else kotlin.math.exp(-distance * distance * 1.7f)
+            val shift by animateFloatAsState(wave, spring(stiffness = Spring.StiffnessMediumLow), label = "artist rail wave")
+            Box(Modifier.weight(1f).fillMaxWidth().clickable { onSelect(index) }.semantics { this.selected = selected == index; contentDescription = "$label artist section" }, contentAlignment = Alignment.Center) {
+                Text(label, color = color, style = MaterialTheme.typography.titleMedium, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false,
+                    modifier = Modifier.graphicsLayer { translationX = -24.dp.toPx() * shift; scaleX = 1 + .12f * shift; scaleY = 1 + .12f * shift }.layout { measurable, _ -> val p = measurable.measure(Constraints()); layout(p.height, p.width) { p.place((p.height - p.width) / 2, (p.width - p.height) / 2) } }.rotate(-90f))
+            }
+        }
         }
     }
 }

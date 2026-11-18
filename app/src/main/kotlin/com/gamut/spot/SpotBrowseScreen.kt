@@ -48,8 +48,9 @@ internal fun SpotBrowseScreen(state: SpotBrowse, home: SpotHome, vm: SpotViewMod
 @Composable
 internal fun DailyMixRail(mixes: List<DailyMix>, loading: Boolean, open: (DailyMix) -> Unit) {
     SHeading("Daily Mixes")
-    if (mixes.isEmpty()) {
-        Text(if (loading) "Making your mixes…" else "Listen to music to shape your mixes.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+    if (loading) RailSkeleton()
+    else if (mixes.isEmpty()) {
+        Text("Listen to music to shape your mixes.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     } else LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         itemsIndexed(mixes, key = { _, mix -> mix.id }) { index, mix ->
             Column(Modifier.width(152.dp).clickable { open(mix) }) {

@@ -10,3 +10,8 @@ if(createHash('sha256').update(binary).digest('hex')!==manifest.sha256)throw Err
 const files=(await readdir('dist')).filter(x=>/\.(exe|dmg|zip|AppImage|deb)$/.test(x));if(!files.length)throw Error('No desktop installer was produced.');
 for(const file of files)if((await stat(path.join('dist',file))).size<1e6)throw Error('Installer is unexpectedly small.');
 console.log('Verified native installers, app archive, licenses and resolver:',files.join(', '));
+const speech=JSON.parse(await readFile(path.join(root,'speech/VERSION.json'),'utf8'));
+for(const [name,expected]of [['ggml-tiny-q5_1.bin',speech.modelSha256],[platform==='win32'?'whisper-cli.exe':'whisper-cli',speech.whisperCliSha256],[platform==='win32'?'ffmpeg.exe':'ffmpeg',speech.ffmpegSha256]]){
+  if(createHash('sha256').update(await readFile(path.join(root,'speech',name))).digest('hex')!==expected)throw Error('Packaged speech checksum mismatch: '+name);
+}
+console.log('Verified bundled offline speech model, recognizer and decoder.');

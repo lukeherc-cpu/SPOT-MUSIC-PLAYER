@@ -55,8 +55,13 @@ internal fun SpotArtistSheet(track: Track, vm: SpotViewModel, onDismiss: () -> U
         LazyColumn(contentPadding = PaddingValues(bottom = 28.dp)) {
             item { SHeading("Artists on this track") }
             items(vm.artistChoices(track)) { artist ->
+                var portrait by remember(artist) { mutableStateOf<String?>(null) }
+                var loading by remember(artist) { mutableStateOf(true) }
+                LaunchedEffect(artist) { portrait = vm.artistPortrait(artist); loading = false }
                 Row(Modifier.fillMaxWidth().clickable { vm.openArtist(artist); onArtist() }.padding(horizontal = 24.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Person, null, Modifier.size(36.dp))
+                    if (loading) SkeletonPulse { Box(Modifier.size(48.dp).background(Card, androidx.compose.foundation.shape.CircleShape)) }
+                    else if (portrait != null) SArt(portrait, Modifier.size(48.dp), circle = true)
+                    else Icon(Icons.Outlined.Person, null, Modifier.size(48.dp))
                     Column(Modifier.weight(1f).padding(start = 18.dp)) { Text(artist.name, style = MaterialTheme.typography.titleMedium); Text("Artist", color = Muted, style = MaterialTheme.typography.bodySmall) }
                     Icon(Icons.Outlined.ChevronRight, null)
                 }

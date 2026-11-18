@@ -9,6 +9,16 @@ import {publicAddress} from '../src/public-network.mjs';
 import {Store} from '../src/store.mjs';
 import {Resolver,rewriteManifest} from '../src/resolver.mjs';
 import {recommendations,browse,albumForTrack,US,seedArtists} from '../src/discovery.mjs';
+import {parseTranscript,cleanVersion,cleanLyricText} from '../src/subtitles.mjs';
+
+test('publisher subtitles keep their real timestamps and clean lyrics mask explicit words',()=>{
+  const parsed=parseTranscript('WEBVTT\n\n00:00:01.200 --> 00:00:03.500\nHello world\n');
+  assert.deepEqual(parsed.cues,[{startMs:1200,endMs:3500,text:'Hello world'}]);
+  assert.equal(cleanVersion({title:'Song (Clean)'}),true);
+  assert.equal(cleanVersion({title:'Song',isExplicit:false}),true);
+  assert.equal(cleanLyricText('This shit is fucking loud'),'This ••• is ••• loud');
+  assert.equal(cleanLyricText('A class of bass musicians'),'A class of bass musicians');
+});
 
 const albumUri='spotify:album:4m2880jivSbbyEGAKfITCa';
 const song=(id='one',artist='Artist A')=>({isrc:id,title:id,artist,album:'Album',albumUri,durationMs:60000,source:'SPOTIFY'});

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 resources/resolver/
+resources/speech/
 resources/icon.png
 test-results/
 playwright-report/

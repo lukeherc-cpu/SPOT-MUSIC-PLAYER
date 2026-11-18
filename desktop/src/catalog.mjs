@@ -24,7 +24,7 @@ function unwrap(value) {
 }
 const artistNames = item => array(item.artists?.items).map(a => a.profile?.name || a.name).filter(Boolean).join(', ');
 function artwork(item) {
-  return array(item?.coverArt?.sources || item?.visuals?.avatarImage?.sources || item?.images?.items?.[0]?.sources).map(x => x.url).find(url => {
+  return array(item?.coverArt?.sources || item?.visuals?.avatarImage?.sources || item?.images?.items?.[0]?.sources).sort((a,b)=>(Number(b.width)||0)-(Number(a.width)||0)).map(x => x.url).find(url => {
     try { const u = new URL(url); return u.protocol === 'https:' && (u.hostname.endsWith('.scdn.co') || u.hostname.endsWith('.spotifycdn.com')); } catch { return false; }
   }) || null;
 }
@@ -33,7 +33,7 @@ export function decodeTrack(item, fallback = {}) {
   if (!validId(id) || !t.name) return null;
   const album = t.albumOfTrack || fallback;
   return { isrc:`spotify:${id}`, title:t.name, artist:artistNames(t) || artistNames(album) || 'Unknown artist', album:album.name || null,
-    durationMs:Number(t.duration?.totalMilliseconds || 0), albumArtUrl:artwork(album), source:'SPOTIFY', albumUri: /^spotify:album:[A-Za-z0-9]{22}$/.test(album.uri) ? album.uri : validId(album.id) ? `spotify:album:${album.id}` : null };
+    durationMs:Number(t.duration?.totalMilliseconds || 0), albumArtUrl:artwork(album), source:'SPOTIFY', isExplicit:t.contentRating?.label? t.contentRating.label==='EXPLICIT':typeof t.explicit==='boolean'?t.explicit:null, albumUri: /^spotify:album:[A-Za-z0-9]{22}$/.test(album.uri) ? album.uri : validId(album.id) ? `spotify:album:${album.id}` : null };
 }
 const unique = (list, key = 'isrc') => [...new Map(list.map(x => [x[key], x])).values()];
 function cards(root, section, type) {

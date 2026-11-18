@@ -16,4 +16,5 @@ interface UiTestData {
     fun testDownloadIndex(): DownloadIndex
     fun testPodcastStore(): PodcastStore
     fun testMusicPlayer(): MusicPlayer
+    fun testPodcastSubtitles(): com.gamut.speech.PodcastSubtitles
 }

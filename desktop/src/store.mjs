@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 export function cleanTrack(t) {
   if(!t||typeof t.isrc!=='string'||!t.isrc||t.isrc.length>160||typeof t.title!=='string'||typeof t.artist!=='string')throw Error('Invalid song.');
   const https=x=>typeof x==='string'&&x.startsWith('https://')?x.slice(0,4000):null;
-  return {isrc:t.isrc,title:t.title.slice(0,300),artist:t.artist.slice(0,250),album:typeof t.album==='string'?t.album.slice(0,300):null,durationMs:Math.max(0,Math.min(86400000,Number(t.durationMs)||0)),albumArtUrl:https(t.albumArtUrl),source:t.source==='PODCAST'?'PODCAST':t.source==='YOUTUBE'?'YOUTUBE':'SPOTIFY',youtubeVideoId:/^[A-Za-z0-9_-]{11}$/.test(t.youtubeVideoId)?t.youtubeVideoId:null,albumUri:/^spotify:album:[A-Za-z0-9]{22}$/.test(t.albumUri)?t.albumUri:null,
+  return {isrc:t.isrc,title:t.title.slice(0,300),artist:t.artist.slice(0,250),album:typeof t.album==='string'?t.album.slice(0,300):null,durationMs:Math.max(0,Math.min(86400000,Number(t.durationMs)||0)),albumArtUrl:https(t.albumArtUrl),source:t.source==='PODCAST'?'PODCAST':t.source==='YOUTUBE'?'YOUTUBE':'SPOTIFY',youtubeVideoId:/^[A-Za-z0-9_-]{11}$/.test(t.youtubeVideoId)?t.youtubeVideoId:null,albumUri:/^spotify:album:[A-Za-z0-9]{22}$/.test(t.albumUri)?t.albumUri:null,isExplicit:typeof t.isExplicit==='boolean'?t.isExplicit:null,
+    transcripts:Array.isArray(t.transcripts)?t.transcripts.slice(0,10).filter(x=>https(x.url)&&typeof x.type==='string').map(x=>({url:https(x.url),type:x.type.slice(0,100),language:String(x.language||'').slice(0,30)})):[],
     ...(t.source==='PODCAST'?{directAudioUrl:https(t.directAudioUrl),feedUrl:https(t.feedUrl),description:String(t.description||'').slice(0,4000),published:String(t.published||'').slice(0,100)}:{})};
 }
 const empty=()=>({version:1,favorites:[],playlists:[],shows:[],history:[],positions:{}});

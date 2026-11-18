@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('spot',Object.freeze({
   download:track=>call('download',track),record:track=>call('record',track),position:(id,value)=>call('position',{id,value}),
   create:name=>call('create',name),append:(id,track)=>call('append',{id,track}),
   version:()=>call('version'),
+  subtitlesStart:(track,position=0)=>call('subtitles-start',{track,position}),subtitlesState:()=>call('subtitles-state'),subtitlesPosition:value=>call('subtitles-position',value),subtitlesStop:()=>call('subtitles-stop'),lyrics:track=>call('lyrics',track),
 }));

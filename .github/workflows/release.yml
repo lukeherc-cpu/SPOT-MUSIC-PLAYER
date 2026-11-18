@@ -40,11 +40,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
-      - name: Keep the development signing identity across alpha builds
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: spot-android-alpha-signing-v1
+      - name: Prepare durable release signing
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SPOT_ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SPOT_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SPOT_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SPOT_ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          values = [os.environ[k] for k in ('KEYSTORE_BASE64', 'STORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD')]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              if not all(values):
+                  output.write('ready=false\n')
+                  print('Signed publication withheld: configure the four SPOT_ANDROID signing secrets. Tests and UI previews will still run.')
+              else:
+                  path = Path(os.environ['RUNNER_TEMP']) / 'spot-release.keystore'
+                  path.write_bytes(base64.b64decode(values[0], validate=True))
+                  path.chmod(0o600)
+                  output.write(f'ready=true\nkeystore={path}\n')
+          PY
       - name: Enable KVM for Android UI checks
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -89,10 +106,22 @@ jobs:
             adb exec-out cat /sdcard/spot-ui-save.png > ui-save.png
             adb exec-out cat /sdcard/spot-ui-lyrics.png > ui-lyrics.png
             adb exec-out cat /sdcard/spot-ui-artist.png > ui-artist.png
-            python3 -c "from pathlib import Path; files=list(Path('.').glob('ui-*.png')); assert len(files)==11; assert all(p.read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a')) and p.stat().st_size > 1000 for p in files)"
+            adb exec-out cat /sdcard/spot-ui-song-menu.png > ui-song-menu.png
+            adb exec-out cat /sdcard/spot-ui-queue.png > ui-queue.png
+            python3 -c "from pathlib import Path; files=list(Path('.').glob('ui-*.png')); assert len(files)==13; assert all(p.read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a')) and p.stat().st_size > 1000 for p in files)"
       - name: Test and build
+        env:
+          RELEASE_SIGNING_READY: ${{ steps.signing.outputs.ready }}
+          GAMUT_KEYSTORE_FILE: ${{ steps.signing.outputs.keystore }}
+          GAMUT_KEYSTORE_PASSWORD: ${{ secrets.SPOT_ANDROID_KEYSTORE_PASSWORD }}
+          GAMUT_KEY_ALIAS: ${{ secrets.SPOT_ANDROID_KEY_ALIAS }}
+          GAMUT_KEY_PASSWORD: ${{ secrets.SPOT_ANDROID_KEY_PASSWORD }}
         run: |
           bash ./gradlew --no-daemon testDebugUnitTest --console=plain
+          if [ "$RELEASE_SIGNING_READY" != true ]; then
+            echo 'Tests passed. No APK published because a durable signing key is not configured.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           bash ./gradlew --no-daemon :app:assembleRelease --console=plain \
             -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" \
             -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))" \
@@ -100,15 +129,32 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk Spot-Music-Android.apk
           sha256sum Spot-Music-Android.apk > SHA256SUMS.txt
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs Spot-Music-Android.apk > SIGNING-IDENTITY.txt
-          python3 -c "from pathlib import Path; assert 'bab3f8d16bf11feee9b15791faac0909e1e9840b27fb79bf21e07a22e3fdce4b' in Path('SIGNING-IDENTITY.txt').read_text(), 'Signing identity changed; do not publish an incompatible update'"
+          python3 -c "from pathlib import Path; expected=Path('.github/android-signing.sha256').read_text().strip(); assert expected in Path('SIGNING-IDENTITY.txt').read_text(), 'Signing identity changed; do not publish an incompatible update'"
+      - name: Preserve UI previews and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-validation-${{ github.run_number }}
+          path: |
+            ui-*.png
+            upgrade-seed.txt
+            upgrade-verify.txt
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            **/build/test-results/testDebugUnitTest/
+          retention-days: 30
       - name: Publish alpha APK directly to GitHub Releases
+        if: steps.signing.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > release-notes.md <<'NOTES'
           Android alpha of Spot Music, based on Gamut, with Spotify catalog discovery adapted from Aran404/SpotAPI.
 
-          - Install over previous GitHub alphas: same signing identity, higher version code and library-preserving database upgrade. The APK and local chat builds use different development keys; use the same download channel as your installed version.
+          - Uses the retained local signing identity and a higher version code. Old GitHub alphas used unretained, changing debug keys and cannot receive an in-place update without their original private key. Keep the old app installed if you need its library.
+          - Automatic offline podcast subtitles with bundled multilingual Whisper Tiny when publisher transcripts are missing.
+          - Clean lyrics, tap-to-cover in both text sizes, skeleton loading throughout and corrected shuffle starting songs.
+          - Left-swipe queueing, long-press song menus, artist popup photos and a centered animated artist rail.
           - Save-sheet playlist selection, explicit labels, higher-resolution artwork and linked artist credits.
           - Artist profiles with a right-side thumb navigation rail.
           - Pull-to-refresh Home, history-based podcast recommendations, varied episode cards and music video links.
@@ -128,6 +174,6 @@ jobs:
 
           Install Spot-Music-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and the previous Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
           NOTES
-          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt SIGNING-IDENTITY.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png ui-save.png ui-lyrics.png ui-artist.png \
+          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt SIGNING-IDENTITY.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png ui-save.png ui-lyrics.png ui-artist.png ui-song-menu.png ui-queue.png \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
             --title "Spot Music Android alpha ${GITHUB_RUN_NUMBER}" --notes-file release-notes.md

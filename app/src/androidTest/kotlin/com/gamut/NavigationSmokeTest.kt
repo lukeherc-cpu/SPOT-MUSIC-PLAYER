@@ -88,6 +88,20 @@ class NavigationSmokeTest {
             device.findObject(By.text("UI Reference Playlist")).click()
             assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
             screenshot(device, "playlist")
+            val beforeQueue = data.testMusicPlayer().queue.value.tracks.size
+            val songRow = device.findObject(By.text("First UI Song")).visibleBounds
+            device.swipe((device.displayWidth * .82).toInt(), songRow.centerY(), (device.displayWidth * .15).toInt(), songRow.centerY(), 22)
+            withTimeout(5000) { data.testMusicPlayer().queue.first { it.tracks.size > beforeQueue && it.tracks.last().isrc == first.isrc } }
+            assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
+            device.findObject(By.text("First UI Song")).longClick()
+            assertTrue(device.wait(Until.hasObject(By.text("Go to queue")), 5000))
+            assertNotNull(device.findObject(By.text("Remove from this playlist")))
+            screenshot(device, "song-menu")
+            device.findObject(By.text("Go to queue")).click()
+            assertTrue(device.wait(Until.hasObject(By.text("Next in queue")), 5000))
+            screenshot(device, "queue")
+            device.pressBack()
+            assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
             device.findObjects(By.desc("Song options")).first().click()
             assertTrue(device.wait(Until.hasObject(By.text("Go to album")), 5000))
             device.findObject(By.text("Go to album")).click()

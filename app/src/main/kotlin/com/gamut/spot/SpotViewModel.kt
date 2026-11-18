@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.*
 
 data class MusicRail(val title: String, val cards: List<SpotifyCard>)
 data class HomeEpisode(val show: PodcastShow, val episode: PodcastEpisode)
-data class SpotHome(val mixes: List<DailyMix> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val podcastReason: String = "", val episodes: List<HomeEpisode> = emptyList(), val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val error: String? = null)
+data class SpotHome(val mixes: List<DailyMix> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val podcastReason: String = "", val episodes: List<HomeEpisode> = emptyList(), val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val podcastsLoading: Boolean = true, val videosLoading: Boolean = true, val error: String? = null)
 data class SpotSearch(val query: String = "", val tracks: List<Track> = emptyList(), val rich: SpotifySearch = SpotifySearch(), val shows: List<PodcastShow> = emptyList(), val youtube: List<Track> = emptyList(), val youtubeLoading: Boolean = false, val youtubeError: String? = null, val musicLoading: Boolean = false, val podcastLoading: Boolean = false, val notice: String? = null, val podcastError: String? = null)
 data class SpotDetail(val key: String, val title: String, val subtitle: String, val artwork: String? = null, val description: String = "", val tracks: List<Track> = emptyList(), val loading: Boolean = false, val error: String? = null, val spotify: SpotifyCollection? = null, val podcast: PodcastShow? = null, val episodes: List<PodcastEpisode> = emptyList(), val skipped: Int = 0)
 
@@ -48,6 +48,7 @@ class SpotViewModel @Inject constructor(
     private val prefetch: PrefetchCoordinator,
     private val youtube: YoutubeMusicSearchSource,
     private val artistFollows: FollowRepository,
+    val podcastSubtitles: com.gamut.speech.PodcastSubtitles,
 ) : ViewModel() {
     val favorites = library.observeFavorites().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val playlists = library.observePlaylists().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -113,7 +114,7 @@ class SpotViewModel @Inject constructor(
         val saved = favorites.value
         val rotation = homeRefreshedAt / (30 * 60_000L) + homeNonce++
         homeJob = viewModelScope.launch {
-            _home.update { it.copy(loading = true, error = null) }
+            _home.update { it.copy(loading = true, podcastsLoading = true, videosLoading = true, error = null) }
             supervisorScope {
                 launch {
                     try {
@@ -132,6 +133,7 @@ class SpotViewModel @Inject constructor(
                         }
                         _home.update { it.copy(episodes = previews) }
                     } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                    finally { if (currentCoroutineContext().isActive) _home.update { it.copy(podcastsLoading = false) } }
                 }
                 launch {
                     try {
@@ -139,6 +141,7 @@ class SpotViewModel @Inject constructor(
                         val videos = youtube.searchBroad("$artist official music video").filterNot { it.channelIsTopicChannel }.take(6)
                         _home.update { it.copy(videos = videos) }
                     } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                    finally { if (currentCoroutineContext().isActive) _home.update { it.copy(videosLoading = false) } }
                 }
             }
         }
@@ -231,13 +234,30 @@ class SpotViewModel @Inject constructor(
     fun artistChoices(song: Track): List<TrackArtist> = song.artists.ifEmpty {
         song.artist.split(Regex("\\s*(?:,|;| feat\\.? | ft\\.? | featuring )\\s*", RegexOption.IGNORE_CASE)).filter { it.isNotBlank() }.map { TrackArtist(it.trim()) }
     }
+    private val artistProfiles = linkedMapOf<String, Deferred<SpotifyCollection>>()
+    private suspend fun artistProfile(artist: TrackArtist): SpotifyCollection {
+        val key = artist.uri ?: artist.name.lowercase()
+        val pending = artistProfiles.getOrPut(key) { viewModelScope.async {
+            val uri = artist.uri ?: catalog.searchAll(artist.name).artists.firstOrNull { it.title.equals(artist.name, true) }?.uri ?: error("Artist unavailable")
+            catalog.collection(uri)
+        } }
+        if (artistProfiles.size > 32) artistProfiles.entries.firstOrNull { it.key != key && it.value.isCompleted }?.let { artistProfiles.remove(it.key) }
+        return try { pending.await() } catch (e: CancellationException) { throw e } catch (e: Exception) { artistProfiles.remove(key); throw e }
+    }
+    suspend fun artistPortrait(artist: TrackArtist): String? = try { artistProfile(artist).artwork } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+    suspend fun lyricTrack(track: Track): Track {
+        if (track.isExplicit != null || track.source != TrackSource.SPOTIFY) return track
+        return try {
+            val match = catalog.searchAll("${track.artist} ${track.title}").tracks.firstOrNull { it.isrc == track.isrc }
+            if (match == null) track else track.copy(isExplicit = match.isExplicit, artists = match.artists.ifEmpty { track.artists }).also { trackDao.upsert(it.toEntity()) }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { track }
+    }
     fun openArtist(artist: TrackArtist) {
         detailJob?.cancel(); pushDetail()
         _detail.value = SpotDetail("artist-for:${artist.name}", artist.name, "Artist", loading = true)
         detailJob = viewModelScope.launch {
             try {
-                val uri = artist.uri ?: catalog.searchAll(artist.name).artists.firstOrNull { it.title.equals(artist.name, true) }?.uri ?: error("Artist unavailable")
-                val value = catalog.collection(uri)
+                val value = artistProfile(artist)
                 _detail.value = SpotDetail(value.uri, value.title, value.subtitle, value.artwork, value.description, value.tracks, spotify = value)
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { _detail.update { it?.copy(loading = false, error = "Couldn't load this artist.") } }
@@ -309,11 +329,11 @@ class SpotViewModel @Inject constructor(
     fun play(track: Track, queue: List<Track>) {
         playJob?.cancel()
         _opening.value = track
-        player.setShuffle(false)
         val list = queue.ifEmpty { listOf(track) }
         val index = list.indexOfFirst { it.isrc == track.isrc }.coerceAtLeast(0)
         player.setQueue(list, index)
-        player.skipTo(index)
+        // A shuffled queue pins the explicitly selected item at position zero.
+        player.skipTo(if (player.shuffleEnabled.value) 0 else index)
         if (track.source == TrackSource.PODCAST) {
             val resume = podcastStore.position(track.isrc)
             if (resume > 0) playJob = viewModelScope.launch {
@@ -321,6 +341,15 @@ class SpotViewModel @Inject constructor(
                 if (started != null) player.seekTo(resume)
             }
         }
+    }
+    fun playCollection(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        val current = when (val state = player.playbackState.value) {
+            is PlaybackState.Playing -> state.track.isrc
+            is PlaybackState.Paused -> state.track.isrc
+            else -> null
+        }
+        play(tracks[collectionStartIndex(tracks, player.shuffleEnabled.value, current)], tracks)
     }
     fun favorite(track: Track) = viewModelScope.launch {
         val adding = favorites.value.none { it.isrc == track.isrc }
@@ -330,6 +359,11 @@ class SpotViewModel @Inject constructor(
     fun createPlaylist(name: String) = viewModelScope.launch { if (name.isNotBlank()) { val id = library.createPlaylist(name.trim().take(100)); _messages.emit("Created ${name.trim()}"); delay(100); openPlaylist(id.toString()) } }
     fun saveToLiked(track: Track) = viewModelScope.launch {
         library.addFavorite(track, System.currentTimeMillis()); prefetch.prepareSaved(track)
+    }
+    fun enqueue(track: Track) { player.addToQueue(track); _messages.tryEmit("Added to queue") }
+    fun removeFromCollection(track: Track, key: String) = viewModelScope.launch {
+        if (key == "liked") { if (favorites.value.any { it.isrc == track.isrc }) library.toggleFavorite(track) }
+        else key.toLongOrNull()?.let { library.removeTrack(it, track.isrc) }
     }
     fun setPlaylistMembership(id: Long, track: Track, included: Boolean) = viewModelScope.launch {
         if (included) { library.appendTrack(id, track); prefetch.prepareSaved(track) } else library.removeTrack(id, track.isrc)

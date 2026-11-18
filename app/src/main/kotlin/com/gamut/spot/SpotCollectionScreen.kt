@@ -60,7 +60,7 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
                     SIcon(Icons.Outlined.MoreVert, "Collection options", tint = Muted, onClick = { menu = true })
                     Spacer(Modifier.weight(1f))
                     if (detail.podcast == null) SIcon(Icons.Outlined.Shuffle, "Shuffle", tint = if (shuffle) Green else Muted, onClick = { vm.player.setShuffle(!shuffle) })
-                    FilledIconButton(onClick = { detail.tracks.firstOrNull()?.let { val wasShuffle = shuffle; vm.play(it, detail.tracks); vm.player.setShuffle(wasShuffle) } }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play collection", Modifier.size(34.dp)) }
+                    FilledIconButton(onClick = { vm.playCollection(detail.tracks) }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play collection", Modifier.size(34.dp)) }
                 }
             }
         }

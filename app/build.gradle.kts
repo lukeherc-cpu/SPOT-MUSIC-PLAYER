@@ -11,6 +11,8 @@ plugins {
 android {
     namespace = "com.gamut"
     compileSdk = 35
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -19,6 +21,7 @@ android {
     defaultConfig {
         applicationId = "com.lukeherc.spotmusic"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("gamut.versionCode") as String?)?.toIntOrNull() ?: 1
@@ -45,6 +48,7 @@ android {
         getByName("main") {
             res.srcDir("${rootDir}/gamut-brandkit/res")
             assets.srcDir("${rootDir}/docs/licenses")
+            assets.srcDir(layout.buildDirectory.dir("generated/speechAssets"))
         }
     }
 
@@ -72,6 +76,15 @@ android {
         }
     }
 }
+
+val prepareSpeech by tasks.registering(Exec::class) {
+    workingDir(rootDir)
+    commandLine("python3", "scripts/prepare_speech.py", "--android")
+    inputs.file(rootProject.file("scripts/prepare_speech.py"))
+    outputs.file(layout.buildDirectory.file("generated/speechAssets/models/ggml-tiny-q5_1.bin"))
+    outputs.file(rootProject.layout.buildDirectory.file("speech-bootstrap/whisper.cpp-1.9.5/include/whisper.h"))
+}
+tasks.configureEach { if (name == "preBuild" || name.startsWith("configureCMake")) dependsOn(prepareSpeech) }
 
 dependencies {
     implementation(project(":core:core-model"))

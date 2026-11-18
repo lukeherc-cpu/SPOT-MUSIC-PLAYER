@@ -17,7 +17,8 @@ export function parseFeed(xml,show) {
     if(enclosure.type?.startsWith('video/'))continue;
     const id=createHash('sha256').update(show.feedUrl+'|'+plain(item.guid||item.id||audio)).digest('hex').slice(0,24);
     if(seen.has(id))continue;seen.add(id);
-    out.push({isrc:`podcast:${id}`,title:plain(item.title)||'Episode',artist:show.title,album:show.title,albumArtUrl:item.image?.href||show.artwork,durationMs:milliseconds(item.duration),source:'PODCAST',directAudioUrl:audio,feedUrl:show.feedUrl,description:plain(item.description||item.summary||item.content).slice(0,4000),published:plain(item.pubDate||item.published)});
+    const transcripts=list(item.transcript).flatMap(x=>{try{return[{url:secureUrl(new URL(x.url,show.feedUrl).href).href,type:x.type||'text/vtt',language:x.language||null}];}catch{return[];}});
+    out.push({isrc:`podcast:${id}`,title:plain(item.title)||'Episode',artist:show.title,album:show.title,albumArtUrl:item.image?.href||show.artwork,durationMs:milliseconds(item.duration),source:'PODCAST',directAudioUrl:audio,feedUrl:show.feedUrl,transcripts,description:plain(item.description||item.summary||item.content).slice(0,4000),published:plain(item.pubDate||item.published)});
     if(out.length>=500)break;
   }
   return out;

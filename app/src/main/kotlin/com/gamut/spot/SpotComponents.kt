@@ -2,6 +2,8 @@ package com.gamut.spot
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -20,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.*
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
@@ -34,6 +39,7 @@ internal val Muted = Color(0xFFB3B3B3)
 internal val LikedBrush = Brush.linearGradient(listOf(Color(0xFF4C18D6), Color(0xFFBFE6D7)))
 internal val LocalArtistTap = staticCompositionLocalOf<(Track) -> Unit> { {} }
 internal val LocalSaveTrack = staticCompositionLocalOf<(Track) -> Unit> { {} }
+internal val LocalQueueTrack = staticCompositionLocalOf<(Track) -> Unit> { {} }
 
 @Composable
 internal fun SpotTheme(content: @Composable () -> Unit) {
@@ -77,6 +83,7 @@ internal fun SChip(text: String, selected: Boolean, onClick: () -> Unit) {
 internal fun SArt(url: String?, modifier: Modifier = Modifier, liked: Boolean = false, circle: Boolean = false) {
     Box(modifier.clip(if (circle) CircleShape else RoundedCornerShape(3.dp)).then(if (liked) Modifier.background(LikedBrush) else Modifier.background(Card)), contentAlignment = Alignment.Center) {
         if (url != null && !liked) SubcomposeAsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.High,
+            loading = { SkeletonPulse(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = .08f))) } },
             error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Filled.MusicNote, null, tint = Muted, modifier = Modifier.fillMaxSize(.38f)) } })
         else Icon(if (liked) Icons.Filled.Favorite else Icons.Filled.MusicNote, null, tint = Color.White, modifier = Modifier.fillMaxSize(.38f))
     }
@@ -102,11 +109,23 @@ internal fun SCardRail(title: String, cards: List<SpotifyCard>, open: (SpotifyCa
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = false, number: Int? = null, artwork: Boolean = true, onPlay: () -> Unit, onMore: () -> Unit) {
     val artistTap = LocalArtistTap.current
     val save = LocalSaveTrack.current
-    Row(Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val enqueue by rememberUpdatedState(LocalQueueTrack.current)
+    val haptics = LocalHapticFeedback.current
+    val swipe = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
+        if (value == SwipeToDismissBoxValue.EndToStart) { enqueue(track); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
+        false
+    })
+    SwipeToDismissBox(state = swipe, enableDismissFromStartToEnd = false, backgroundContent = {
+        Box(Modifier.fillMaxSize().background(Green).padding(end = 24.dp), contentAlignment = Alignment.CenterEnd) { Icon(Icons.Outlined.PlaylistAdd, "Add to queue", tint = Color.Black) }
+    }) {
+    Row(Modifier.fillMaxWidth().background(Black).combinedClickable(onClick = onPlay, onLongClickLabel = "Song options", onLongClick = onMore)
+        .semantics { customActions = listOf(CustomAccessibilityAction("Add to queue") { enqueue(track); true }) }
+        .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (number != null) Text(number.toString(), Modifier.width(28.dp), color = if (playing) Green else Muted, style = MaterialTheme.typography.bodyMedium)
         if (artwork) SArt(track.albumArtUrl, Modifier.size(52.dp))
         Column(Modifier.weight(1f).padding(start = if (artwork) 12.dp else 0.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -118,6 +137,7 @@ internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = fal
         }
         SIcon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, if (saved) "Saved in playlists" else "Save song", tint = if (saved) Green else Muted, size = 22.dp, onClick = { save(track) })
         SIcon(Icons.Outlined.MoreVert, "Song options", tint = Muted, onClick = onMore)
+    }
     }
 }
 

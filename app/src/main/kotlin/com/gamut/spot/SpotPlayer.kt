@@ -56,7 +56,7 @@ internal fun SpotMiniPlayer(track: Track, player: MusicPlayer, playing: Boolean,
                 Text(if (opening || awaiting) "Connecting…" else (if (track.isExplicit == true) "E · " else "") + track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             SIcon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save song", tint = if (saved) Green else Color.White, size = 24.dp, onClick = onSave)
-            if (opening || awaiting) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp) }
+            if (opening || awaiting) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { SkeletonPulse { Box(Modifier.size(24.dp).background(Color.White.copy(alpha = .25f), CircleShape)) } }
             else SIcon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", size = 32.dp, onClick = { if (playing) player.pause() else player.resume() })
         }
         LinearProgressIndicator(progress = { if (total > 0) (position.toFloat() / total).coerceIn(0f, 1f) else 0f }, modifier = Modifier.fillMaxWidth().height(2.dp).padding(horizontal = 8.dp), color = Color.White, trackColor = Color.White.copy(alpha = .2f))
@@ -72,6 +72,7 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
     val repeat by vm.player.repeatMode.collectAsState()
     val actualDuration by vm.player.streamDurationMs.collectAsState()
     val awaiting by vm.player.awaitingAudio.collectAsState()
+    val subtitles by vm.podcastSubtitles.state.collectAsState()
     val position = when (val value = state) { is PlaybackState.Playing -> value.positionMs; is PlaybackState.Paused -> value.positionMs; else -> 0L }
     val duration = (actualDuration.takeIf { it > 0 } ?: track.durationMs).coerceAtLeast(1)
     val podcast = track.source == TrackSource.PODCAST
@@ -86,16 +87,25 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
     var showWords by rememberSaveable(track.isrc) { mutableStateOf(false) }
     val flip by animateFloatAsState(if (showWords) 180f else 0f, tween(380), label = "cover text flip")
     var words by remember(track.isrc) { mutableStateOf<LyricsState>(LyricsState.Loading) }
+    var cleanText by remember(track.isrc) { mutableStateOf(CleanLyrics.required(track)) }
     var dragging by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(track.isrc, showWords) {
+    LaunchedEffect(track.isrc, showWords, subtitles) {
+        if (podcast && subtitles.trackId == track.isrc) {
+            words = when {
+                subtitles.cues.isNotEmpty() -> LyricsState.Loaded(subtitles.cues.map { LyricsLine(it.startMs, it.text, it.endMs) }, subtitles.timed)
+                subtitles.error != null -> LyricsState.Error(subtitles.error!!)
+                else -> LyricsState.Loading
+            }
+        }
         if (showWords && words is LyricsState.Loading) {
-            words = if (!podcast) LyricsRepository.fetchLyrics(track) else try {
-                vm.podcastTranscript(track)?.let { transcript -> LyricsState.Loaded(transcript.cues.map { LyricsLine(it.startMs, it.text, it.endMs) }, transcript.timed) }
-                    ?: LyricsState.NotAvailable("This publisher hasn't provided a transcript for this episode.")
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (_: Exception) { LyricsState.Error("Couldn't load this publisher's subtitles.") }
+            if (!podcast) {
+                val lyricTrack = vm.lyricTrack(track)
+                cleanText = CleanLyrics.required(lyricTrack)
+                words = CleanLyrics.apply(lyricTrack, LyricsRepository.fetchLyrics(lyricTrack, duration))
+            }
         }
     }
+    val displayWords = remember(track.isrc, track.title, track.isExplicit, words) { if (podcast) words else CleanLyrics.apply(track, words) }
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(top, Black)))) {
         // The player itself never scrolls. The square artwork gives its space to the text.
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().then(if (expanded) Modifier.clearAndSetSemantics { } else Modifier)) {
@@ -111,7 +121,8 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                 val side = minOf(maxWidth, maxHeight)
                 Box(Modifier.size(side).graphicsLayer { rotationY = flip; cameraDistance = 16 * density }) {
                     if (flip > 90f) Box(Modifier.fillMaxSize().graphicsLayer { rotationY = 180f }) {
-                        SpotWordsPanel(if (podcast) "Subtitles" else "Lyrics", words, position, wordsColor, false, { expanded = true }, { showWords = false }, vm.player::seekTo)
+                        SpotWordsPanel(if (podcast) "Subtitles" else "Lyrics", displayWords, position, wordsColor, false, { expanded = true }, { showWords = false }, vm.player::seekTo,
+                            caption = if (podcast && subtitles.generated) "Auto-generated subtitles" else if (!podcast && cleanText) "Clean lyrics" else null)
                     } else Box(Modifier.fillMaxSize().clickable(onClickLabel = if (podcast) "Show subtitles" else "Show lyrics") { showWords = true }.semantics { contentDescription = if (podcast) "Cover art, show subtitles" else "Cover art, show lyrics" }) {
                         SArt(track.albumArtUrl, Modifier.fillMaxSize())
                         Surface(Modifier.align(Alignment.BottomCenter).padding(10.dp), shape = CircleShape, color = Color.Black.copy(alpha = .58f), contentColor = Color.White) {
@@ -143,7 +154,7 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                 if (podcast) SIcon(Icons.Outlined.Replay10, "Back 15 seconds", onClick = { vm.player.seekTo((position - 15000).coerceAtLeast(0)) })
                 else SIcon(Icons.Filled.SkipPrevious, "Previous song", size = 36.dp, onClick = vm.player::skipPrevious)
                 FilledIconButton(onClick = { if (playing) vm.player.pause() else vm.player.resume() }, enabled = !opening, modifier = Modifier.size(64.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = Color.Black, disabledContainerColor = Color.White, disabledContentColor = Color.Black)) {
-                    if (opening || awaiting) CircularProgressIndicator(Modifier.size(28.dp), color = Color.Black, strokeWidth = 2.dp)
+                    if (opening || awaiting) SkeletonPulse { Box(Modifier.size(28.dp).background(Color.Black.copy(alpha = .2f), CircleShape)) }
                     else Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", Modifier.size(40.dp))
                 }
                 if (podcast) SIcon(Icons.Outlined.Forward10, "Forward 15 seconds", onClick = { vm.player.seekTo((position + 15000).coerceAtMost(duration)) })
@@ -162,7 +173,8 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                 SIcon(Icons.Outlined.QueueMusic, "Queue", size = 22.dp, onClick = { queueSheet = true })
             }
         }
-        if (expanded) FullScreenWords(if (podcast) "Subtitles" else "Lyrics", words, position, wordsColor, { expanded = false }, { expanded = false; showWords = false }, vm.player::seekTo)
+        if (expanded) FullScreenWords(if (podcast) "Subtitles" else "Lyrics", displayWords, position, wordsColor, { expanded = false }, { expanded = false; showWords = false }, vm.player::seekTo,
+            caption = if (podcast && subtitles.generated) "Auto-generated subtitles" else if (!podcast && cleanText) "Clean lyrics" else null)
     }
     if (queueSheet) ModalBottomSheet(onDismissRequest = { queueSheet = false }, containerColor = Color(0xFF222222)) {
         LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
