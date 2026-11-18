@@ -1,5 +1,10 @@
 Desktop alpha for Windows, macOS and Linux.
 
+- Automatic offline podcast subtitles with bundled multilingual Whisper Tiny when publisher text is missing. Generated cues are timed and cached; first-play processing takes time and recognition may contain errors.
+- Tap cover art for lyrics or subtitles, expand the text to full screen, and tap text to return to the cover without seeking.
+- Clean-version lyric filtering, skeleton content loading and randomized shuffle starting songs.
+- Removes the duplicate Listen again section while keeping Recently played.
+
 - Spotify-style desktop Home, Search, Library, collection pages, song menus and full player.
 - Real Spotify US/global charts and dedicated Music, genre and new-release discovery pages.
 - Daily Mixes built from this app's listening history, with recommendations that refresh as you listen.
