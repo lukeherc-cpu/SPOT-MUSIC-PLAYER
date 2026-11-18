@@ -13,6 +13,8 @@ import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,10 +30,16 @@ class PodcastSpeechTest {
         data.testDownloadIndex().save(DownloadEntity(track.isrc, file.path, System.currentTimeMillis(), file.length()))
         withTimeout(5000) { data.testDownloadIndex().downloads.first { track.isrc in it } }
         val subtitles = data.testPodcastSubtitles()
-        data.testMusicPlayer().setQueue(listOf(track), 0)
-        data.testMusicPlayer().play(track, file.path)
-        val result = withTimeout(120_000) { subtitles.state.first { it.trackId == track.isrc && it.cues.isNotEmpty() } }
-        data.testMusicPlayer().pause()
+        withContext(Dispatchers.Main.immediate) {
+            data.testMusicPlayer().setQueue(listOf(track), 0)
+            data.testMusicPlayer().play(track, file.path)
+        }
+        val result = try {
+            withTimeout(120_000) { subtitles.state.first { it.trackId == track.isrc && (it.cues.isNotEmpty() || it.error != null) } }
+        } finally {
+            withContext(Dispatchers.Main.immediate) { data.testMusicPlayer().pause() }
+        }
+        assertNull(result.error)
         assertTrue(result.generated)
         assertTrue(result.timed)
         val text = result.cues.joinToString(" ") { it.text }.lowercase()
