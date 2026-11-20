@@ -12,7 +12,7 @@ import {ArtworkCache} from './artwork.mjs';
 import {SubtitleEngine,lyrics} from './subtitles.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
-protocol.registerSchemesAsPrivileged([{scheme:'spot',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-audio',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-art',privileges:{standard:true,secure:true}}]);
+protocol.registerSchemesAsPrivileged([{scheme:'spot',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-audio',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-art',privileges:{standard:true,secure:true,corsEnabled:true}}]);
 if(process.env.SPOT_TEST_DATA)app.setPath('userData',process.env.SPOT_TEST_DATA);
 const single=app.requestSingleInstanceLock();if(!single&&!process.env.SPOT_TEST_DATA)app.quit();
 let win,store,resolver,subtitles;const catalog=new Catalog();
@@ -36,6 +36,8 @@ async function dispatch(command,value){
     case'album':return albumForTrack(catalog,cleanTrack(value));
     case'import':{const uri=resource(string(value,500));if(!/^spotify:(playlist|album):/.test(uri))throw Error('Import a playlist or album.');const collection=await catalog.collection(uri);await store.importCollection(collection);return{library:store.snapshot(),count:collection.tracks.length,skipped:collection.skipped};}
     case'favorite':return store.favorite(value);
+    case'save-later':return store.saveLater(value);
+    case'hide':return store.hide(value);
     case'follow':return store.follow(show(value));
     case'episodes':{const podcast=show(value);return{title:podcast.title,subtitle:podcast.author,artwork:podcast.artwork,show:podcast,tracks:await episodes(podcast)};}
     case'resolve':{const codec=value.codec||'auto';if(!['auto','opus','aac','hls'].includes(codec))throw Error('Invalid audio format.');return resolver.resolve(cleanTrack(value.track),value.force===true,codec);}
@@ -61,7 +63,7 @@ function createWindow(){
   win.loadURL('spot://app/index.html');
 }
 app.whenReady().then(async()=>{
-  nativeTheme.themeSource='dark';
+  nativeTheme.themeSource='system';
   store=new Store(app.getPath('userData'));await store.load();
   const resources=app.isPackaged?process.resourcesPath:path.resolve(here,'../resources');
   resolver=new Resolver(path.join(app.getPath('userData'),'audio'),path.join(resources,'resolver',process.platform==='win32'?'yt-dlp.exe':'yt-dlp'),process.execPath);await resolver.load();
@@ -72,14 +74,14 @@ app.whenReady().then(async()=>{
     const u=new URL(request.url);
     if(u.hostname==='app'&&/^\/audio\/[a-f0-9-]{36}$/.test(u.pathname)){try{return await resolver.response(request);}catch{return new Response('Audio unavailable',{status:502});}}
     if(u.hostname==='app'&&u.pathname==='/hls.mjs')return net.fetch(pathToFileURL(path.join(here,'../node_modules/hls.js/dist/hls.light.mjs')).href);
-    const allowed=new Set(['/index.html','/app.js','/words.js','/style.css']);
+    const allowed=new Set(['/index.html','/app.js','/words.js','/prefs.js','/color.js','/style.css']);
     if(u.hostname!=='app'||!allowed.has(u.pathname))return new Response(null,{status:404});
     return net.fetch(pathToFileURL(path.join(here,'../ui',u.pathname.slice(1))).href);
   });
   protocol.handle('spot-audio',async request=>{try{return await resolver.response(request);}catch{return new Response('Audio unavailable',{status:502});}});
   const artwork=new ArtworkCache();
   protocol.handle('spot-art',async request=>{
-    try{const url=new URL(request.url).searchParams.get('url');if(!url||url.length>4000)throw Error('Invalid artwork.');const image=await artwork.get(url);return new Response(image.body,{headers:{'Content-Type':image.mime,'Cache-Control':'max-age=3600'}});}catch{return new Response(null,{status:404});}
+    try{const url=new URL(request.url).searchParams.get('url');if(!url||url.length>4000)throw Error('Invalid artwork.');const image=await artwork.get(url);return new Response(image.body,{headers:{'Content-Type':image.mime,'Cache-Control':'max-age=3600','Access-Control-Allow-Origin':'spot://app'}});}catch{return new Response(null,{status:404});}
   });
   ipcMain.handle('spot:request',async(event,command,value)=>{
     if(event.sender!==win?.webContents||!event.senderFrame?.url.startsWith('spot://app/'))throw Error('Untrusted caller.');

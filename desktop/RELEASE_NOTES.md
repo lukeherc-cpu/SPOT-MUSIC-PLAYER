@@ -1,10 +1,22 @@
 Desktop alpha for Windows, macOS and Linux.
 
+- New layout: Home, Search, Discover and Your Library tabs across the top, with search that opens in place on every page, and a profile tab for settings.
+- Light mode, plus a "match my computer" option.
+- Songs, albums, playlists, podcasts and artists each have their own cover shape and badge.
+- Customize Home: pin, reorder, hide or add rows from your library, and turn recommendation rows off.
+- Discover tab with 30-second previews by genre, and Saves for things you want to hear later.
+- Artist pages with Overview, Releases (list or grid, collapsible) and About tabs. Album pages show every contributing artist.
+- Select several songs at once to like, queue, save or add them to a playlist. Create and name a new playlist while adding songs.
+- Like and Add to playlist are separate buttons. Song menus add Save for later, Go to artist, Song credits, Sleep timer and Hide song.
+- Queue grouped by where songs came from, with remove, reorder, shuffle-group and clear controls.
+- Player bar tinted by the cover art while playing, a lyrics popup with adjustable text size, and tap a lyric line to jump to it.
+- Your Library in the sidebar is grouped into Playlists, Saves, Artists and Podcasts, with a full-page view, sorting and smart playlists by artist.
+
 - Fixes Linux subtitle generation from streamed podcasts by keeping publisher HTTPS and byte-range requests in the app's validated network transport.
 - Handles repeated RSS/iTunes title and duration fields, including NPR feeds.
 
 - Automatic offline podcast subtitles with bundled multilingual Whisper Tiny when publisher text is missing. Generated cues are timed and cached; first-play processing takes time and recognition may contain errors.
-- Tap cover art for lyrics or subtitles, expand the text to full screen, and tap text to return to the cover without seeking.
+- Tap cover art for lyrics or subtitles and expand the text to full screen.
 - Clean-version lyric filtering, skeleton content loading and randomized shuffle starting songs.
 - Removes the duplicate Listen again section while keeping Recently played.
 

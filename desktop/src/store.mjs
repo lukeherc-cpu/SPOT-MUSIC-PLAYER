@@ -9,13 +9,16 @@ export function cleanTrack(t) {
     transcripts:Array.isArray(t.transcripts)?t.transcripts.slice(0,10).filter(x=>https(x.url)&&typeof x.type==='string').map(x=>({url:https(x.url),type:x.type.slice(0,100),language:String(x.language||'').slice(0,30)})):[],
     ...(t.source==='PODCAST'?{directAudioUrl:https(t.directAudioUrl),feedUrl:https(t.feedUrl),description:String(t.description||'').slice(0,4000),published:String(t.published||'').slice(0,100)}:{})};
 }
-const empty=()=>({version:1,favorites:[],playlists:[],shows:[],history:[],positions:{}});
+const empty=()=>({version:1,favorites:[],playlists:[],shows:[],history:[],positions:{},saves:[],hidden:[]});
 export class Store {
   constructor(directory){this.directory=directory;this.file=path.join(directory,'library.json');this.state=empty();this.tail=Promise.resolve();}
   async load(){await mkdir(this.directory,{recursive:true});try{const data=JSON.parse(await readFile(this.file,'utf8'));if(data.version!==1)throw Error('Unsupported library version.');this.state={...empty(),...data};}catch(e){if(e.code!=='ENOENT')throw e;}return this.snapshot();}
   snapshot(){return structuredClone(this.state);}
   change(mutator){const result=this.tail.then(async()=>{const next=this.snapshot();await mutator(next);await writeFile(this.file+'.tmp',JSON.stringify(next),{mode:0o600});await rename(this.file+'.tmp',this.file);this.state=next;return this.snapshot();});this.tail=result.catch(()=>{});return result;}
   favorite(raw){const t=cleanTrack(raw);return this.change(s=>{const at=s.favorites.findIndex(x=>x.isrc===t.isrc);if(at>=0)s.favorites.splice(at,1);else s.favorites.unshift(t);});}
+  toggle(list,raw){const t=cleanTrack(raw);return this.change(s=>{s[list]=Array.isArray(s[list])?s[list]:[];const at=s[list].findIndex(x=>x.isrc===t.isrc);if(at>=0)s[list].splice(at,1);else s[list].unshift(t);if(s[list].length>2000)s[list].length=2000;});}
+  saveLater(raw){return this.toggle('saves',raw);}
+  hide(raw){return this.toggle('hidden',raw);}
   importCollection(collection){
     const tracks=[...new Map(collection.tracks.map(cleanTrack).map(t=>[t.isrc,t])).values()];
     if(!tracks.length)throw Error('No available songs to import.');
