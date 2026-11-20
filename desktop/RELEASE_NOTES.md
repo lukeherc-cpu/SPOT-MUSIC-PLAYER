@@ -1,7 +1,7 @@
 Desktop alpha for Windows, macOS and Linux.
 
 - Log in with Spotify on the Import page, then bring over some or all of your playlists and your mixes (Daily Mix, Discover Weekly, Release Radar and more). The sign-in session is kept encrypted on this computer.
-- Replace with clean version in the song menu for explicit songs. If no clean version turns up on its own, pick a YouTube upload from a list, with a preview.
+- Make a clean version in the song menu for explicit songs. Both the explicit and clean versions stay in your library, side by side. If no clean version turns up on its own, pick a YouTube upload from a list, with a preview.
 - Your mixes on Home: an artist mix for each favorite artist, plus Chill, Upbeat and Late Night mixes.
 - New episodes row and a blue dot on followed shows that have an episode you haven't opened.
 - Home shows your last mixes at once on launch while fresh ones load.

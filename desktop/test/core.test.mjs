@@ -211,15 +211,15 @@ test('clean version matching picks Spotify clean releases, then clean YouTube up
   const choices=await findClean({search:async()=>({tracks:[]})},async()=>[{...video,title:'Money Trees live'}],song);
   assert.equal(choices.track,undefined);assert.equal(choices.choices.length,1);
 });
-test('replacing a song swaps it everywhere it is saved, once',async()=>{
+test('a clean version is added right after the explicit song everywhere it is saved',async()=>{
   const directory=await mkdtemp(path.join(os.tmpdir(),'spot-replace-'));
   try{
     const store=new Store(directory);await store.load();
     const a={isrc:'spotify:a',title:'A',artist:'X',source:'SPOTIFY',isExplicit:true},b={isrc:'youtube:bbbbbbbbbbb',title:'A (Clean)',artist:'X',source:'YOUTUBE',youtubeVideoId:'bbbbbbbbbbb',isExplicit:false};
     await store.favorite(a);await store.importCollection({title:'P',tracks:[a,b,{isrc:'spotify:c',title:'C',artist:'Y'}]});
-    const s=await store.replace(a.isrc,b);
-    assert.deepEqual(s.favorites.map(x=>x.isrc),[b.isrc]);assert.deepEqual(s.playlists[0].tracks.map(x=>x.isrc),[b.isrc,'spotify:c']);
-    assert.equal(s.favorites[0].youtubeVideoId,'bbbbbbbbbbb');
+    const s=await store.addVersion(a.isrc,b);
+    assert.deepEqual(s.favorites.map(x=>x.isrc),[a.isrc,b.isrc]);assert.deepEqual(s.playlists[0].tracks.map(x=>x.isrc),[a.isrc,b.isrc,'spotify:c']);
+    assert.equal(s.favorites[1].youtubeVideoId,'bbbbbbbbbbb');assert.equal(s.saves.length,0);
     await store.markSeen('https://feed.example/show.xml');assert.ok(store.snapshot().seen['https://feed.example/show.xml']>0);
   }finally{await rm(directory,{recursive:true,force:true});}
 });
@@ -237,4 +237,16 @@ test('signed-in library falls back to GraphQL and keeps only personal mixes',asy
   catalog.search=async()=>({tracks:[],playlists:[{uri:'spotify:playlist:37i9dQZEVXcABCDEFGHIJKLM',title:'Discover Weekly',subtitle:'',artwork:null,type:'playlist'}]});
   assert.deepEqual((await catalog.libraryPlaylists()).map(x=>x.title),['Road trip']);
   assert.deepEqual((await catalog.personalMixes()).map(x=>x.title),['Daily Mix 1','Discover Weekly']);
+});
+test('search leads with a matching podcast for show names and with playlists for moods and eras',async()=>{
+  const {topResult,isMood}=await import('../src/search.mjs');
+  for(const q of ['chill','2000s','90s hits','workout','late night','Lo-Fi'])assert.ok(isMood(q),q);
+  for(const q of ['the journal','blinding lights','drake'])assert.equal(isMood(q),false,q);
+  const song=(title,artist='Someone')=>({isrc:`spotify:${title}${artist}`,title,artist});
+  const card=(title,type)=>({uri:`spotify:${type}:x${title}`,title,subtitle:type,type});
+  assert.equal(topResult('the journal',{tracks:[song('The Journal'),song('The Journal','B'),song('The Journal','C')],shows:[{title:'The Journal.',feedUrl:'https://f.example/a'}],playlists:[card('Journal','playlist')],top:[{kind:'podcast'}]}).kind,'podcast');
+  assert.equal(topResult('chill',{tracks:[song('Chill')],playlists:[card('Chill Vibes','playlist')],top:[{kind:'song'}]}).kind,'playlist');
+  assert.equal(topResult('2000s',{tracks:[song('2000s')],playlists:[card('All Out 2000s','playlist')]}).kind,'playlist');
+  assert.equal(topResult('rap caviar',{tracks:[song('Caviar')],playlists:[card('RapCaviar','playlist')],top:[{kind:'playlist'}]}).kind,'playlist');
+  assert.equal(topResult('blinding lights',{tracks:[song('Blinding Lights','The Weeknd')],playlists:[card('Chill Hits','playlist')],top:[{kind:'song'}]}).kind,'song');
 });

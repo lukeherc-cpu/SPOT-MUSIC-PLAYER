@@ -241,6 +241,11 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     search.youtubeError?.let { message -> item { ErrorRow(message, vm::searchYoutube) } }
                                     if (!search.youtubeLoading && search.youtubeError == null && search.youtube.isEmpty()) item { Text("No YouTube results yet. Try a song title and artist.", color = Muted, modifier = Modifier.padding(16.dp)) }
                                 }
+                                // Sections follow the query: a show name puts Podcasts first, a mood or era puts Playlists first.
+                                val order = SearchRanking.order(search.query, search.tracks, search.shows, search.rich.playlists, search.rich.artists, search.rich.albums, search.rich.top)
+                                order.forEach { section ->
+                                    when (section) {
+                                SearchRanking.Section.Songs -> {
                                 if (searchFilter in listOf("All", "Music")) {
                                     if (search.tracks.isNotEmpty()) item { SHeading("Songs") }
                                     val songs = if (searchFilter == "All") search.tracks.take(6) else search.tracks
@@ -248,6 +253,8 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     if (search.musicLoading) item { DiscoverySkeleton() }
                                     search.notice?.let { item { Text(it, style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(16.dp)) } }
                                 }
+                                }
+                                SearchRanking.Section.Podcasts -> {
                                 if (searchFilter in listOf("All", "Podcasts")) {
                                     if (search.shows.isNotEmpty() || search.rich.podcasts.isNotEmpty()) item { SHeading("Podcasts") }
                                     val shows = if (searchFilter == "All") search.shows.take(3) else search.shows
@@ -256,9 +263,18 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     if (search.podcastLoading) item { DiscoverySkeleton() }
                                     search.podcastError?.let { item { ErrorRow(it) { vm.search(search.query) } } }
                                 }
+                                }
+                                SearchRanking.Section.Playlists -> {
                                 if (searchFilter in listOf("All", "Playlists")) item { SCardRail("Playlists", search.rich.playlists, vm::openCard) }
+                                }
+                                SearchRanking.Section.Albums -> {
                                 if (searchFilter in listOf("All", "Albums")) item { SCardRail("Albums", search.rich.albums, vm::openCard) }
+                                }
+                                SearchRanking.Section.Artists -> {
                                 if (searchFilter in listOf("All", "Artists")) item { SCardRail("Artists", search.rich.artists, vm::openCard) }
+                                }
+                                    }
+                                }
                                 if (searchFilter != "YouTube" && !search.musicLoading && !search.podcastLoading && search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty()) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
                             }
                         }
@@ -341,7 +357,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Person, "Go to artist") { artistTrack = song; actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
-                if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Replace with clean version") { vm.replaceWithClean(song, detail?.key); actions = null }
+                if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Make a clean version") { vm.makeCleanVersion(song, detail?.key); actions = null }
             }
         } }
         cleanChoices?.let { choice -> ModalBottomSheet(onDismissRequest = vm::dismissCleanChoices, containerColor = Color(0xFF222222)) {

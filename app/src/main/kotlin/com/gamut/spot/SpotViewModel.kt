@@ -555,8 +555,8 @@ class SpotViewModel @Inject constructor(
             }
         }
     }
-    /** Swaps an explicit song for its clean version wherever it is: this playlist or Liked Songs, and the queue. */
-    fun replaceWithClean(song: Track, collectionKey: String?) = viewModelScope.launch {
+    /** Makes a clean version of an explicit song and keeps both: the clean one sits right after the explicit one. */
+    fun makeCleanVersion(song: Track, collectionKey: String?) = viewModelScope.launch {
         _cleanSearching.value = song.isrc
         _messages.emit("Looking for a clean version of ${song.title}…")
         val clean = try { findClean(song) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } finally { _cleanSearching.value = null }
@@ -589,20 +589,23 @@ class SpotViewModel @Inject constructor(
     fun dismissCleanChoices() { _cleanChoices.value = null }
     private suspend fun applyClean(song: Track, collectionKey: String?, clean: Track) {
         trackDao.upsert(clean.toEntity())
-        fun List<Track>.swapped() = map { if (it.isrc == song.isrc) clean else it }.distinctBy { it.isrc }
+        // Both versions stay: the clean one goes right after the explicit one wherever that is saved.
+        fun List<Track>.withClean(): List<Track> {
+            if (none { it.isrc == song.isrc }) return this
+            val rest = filter { it.isrc != clean.isrc }
+            val at = rest.indexOfFirst { it.isrc == song.isrc }
+            return rest.take(at + 1) + clean + rest.drop(at + 1)
+        }
         val playlistId = collectionKey?.toLongOrNull()
-        if (playlistId != null) library.replaceTracks(playlistId, playlistTracks.value[playlistId].orEmpty().swapped())
-        if (favorites.value.any { it.isrc == song.isrc }) {
-            val order = favorites.value.swapped()
-            library.toggleFavorite(song); library.addFavorite(clean, System.currentTimeMillis()); library.setFavoriteOrder(order)
+        if (playlistId != null) library.replaceTracks(playlistId, playlistTracks.value[playlistId].orEmpty().withClean())
+        if (favorites.value.any { it.isrc == song.isrc } && favorites.value.none { it.isrc == clean.isrc }) {
+            val order = favorites.value.withClean()
+            library.addFavorite(clean, System.currentTimeMillis()); library.setFavoriteOrder(order)
         }
         val queue = player.queue.value
         val at = queue.tracks.indexOfFirst { it.isrc == song.isrc }
-        if (at >= 0) {
-            if (at == queue.currentIndex) play(clean, queue.tracks.map { if (it.isrc == song.isrc) clean else it }, _playContext.value)
-            else { player.removeFromQueue(at); player.addToQueue(clean, playNext = at == queue.currentIndex + 1) }
-        }
-        _messages.emit("Replaced with the clean version")
+        if (at >= 0 && queue.tracks.none { it.isrc == clean.isrc }) player.addToQueue(clean, playNext = at == queue.currentIndex)
+        _messages.emit("Made a clean version of ${song.title.substringBefore(" (")}. Both versions are saved.")
     }
     /**
      * Finds a clean version of an explicit song. Spotify supplies the clean metadata where it has one, and a clean
