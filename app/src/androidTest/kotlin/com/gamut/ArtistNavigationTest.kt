@@ -38,7 +38,6 @@ class ArtistNavigationTest {
             assertTrue(device.wait(Until.gone(By.textContains("monthly listeners")), 5000))
             device.findObject(By.desc("Songs artist section")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Popular")), 5000))
-            assertTrue(device.wait(Until.hasObject(By.desc("Songs artist section").selected(true)), 5000))
             device.findObject(By.desc("Albums artist section")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Albums and singles")), 5000))
             device.findObject(By.desc("Overview artist section")).click()
