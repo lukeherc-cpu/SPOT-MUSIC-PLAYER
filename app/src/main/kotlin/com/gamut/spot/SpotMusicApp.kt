@@ -248,7 +248,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 SearchRanking.Section.Songs -> {
                                 if (searchFilter in listOf("All", "Music")) {
                                     if (search.tracks.isNotEmpty()) item { SHeading("Songs") }
-                                    val songs = if (searchFilter == "All") search.tracks.take(6) else search.tracks
+                                    val songs = if (searchFilter == "All") CleanVersions.preview(search.tracks, 6) else search.tracks
                                     items(songs, key = { "search-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.tracks) }, onMore = { actions = song }) }
                                     if (search.musicLoading) item { DiscoverySkeleton() }
                                     search.notice?.let { item { Text(it, style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(16.dp)) } }

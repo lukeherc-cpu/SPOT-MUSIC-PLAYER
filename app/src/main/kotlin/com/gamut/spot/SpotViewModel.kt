@@ -9,6 +9,7 @@ import com.gamut.core.database.toDomain
 import com.gamut.core.database.toEntity
 import com.gamut.core.sync.FollowRepository
 import com.gamut.core.model.*
+import kotlinx.serialization.builtins.serializer
 import com.gamut.core.network.*
 import com.gamut.core.player.*
 import com.gamut.feature.library.LibraryRepository
@@ -88,6 +89,13 @@ class SpotViewModel @Inject constructor(
         val raw = homeCache.getString(key, null) ?: return emptyList()
         return runCatching { homeJson.decodeFromString(mixList, raw) }.getOrDefault(emptyList())
     }
+    // Clean versions the person made, keyed by the explicit song, so search shows both versions together.
+    private val cleanPrefs by lazy { appContext.getSharedPreferences("cadence_clean", android.content.Context.MODE_PRIVATE) }
+    private val cleanMap = kotlinx.serialization.builtins.MapSerializer(String.serializer(), Track.serializer())
+    private val cleanVersions: MutableMap<String, Track> by lazy {
+        runCatching { homeJson.decodeFromString(cleanMap, cleanPrefs.getString("versions", null) ?: "{}") }.getOrDefault(emptyMap()).toMutableMap()
+    }
+    private fun withCleanVersions(tracks: List<Track>): List<Track> = CleanVersions.insert(tracks, cleanVersions)
     private val _home = MutableStateFlow(SpotHome(mixes = cachedMixes("mixes"), personal = cachedMixes("personal")))
     val home = _home.asStateFlow()
     private val _search = MutableStateFlow(SpotSearch())
@@ -300,7 +308,7 @@ class SpotViewModel @Inject constructor(
                 launch {
                     try {
                         searchRepository.search(q).collect { result ->
-                            _search.update { it.copy(tracks = result.tracks, musicLoading = !result.isFinal, notice = result.catalogNotice) }
+                            _search.update { it.copy(tracks = withCleanVersions(result.tracks), musicLoading = !result.isFinal, notice = result.catalogNotice) }
                             prefetch.prefetch(result.tracks.take(2))
                         }
                     } catch (e: CancellationException) { throw e }
@@ -589,6 +597,9 @@ class SpotViewModel @Inject constructor(
     fun dismissCleanChoices() { _cleanChoices.value = null }
     private suspend fun applyClean(song: Track, collectionKey: String?, clean: Track) {
         trackDao.upsert(clean.toEntity())
+        cleanVersions[song.isrc] = clean
+        withContext(Dispatchers.IO) { cleanPrefs.edit().putString("versions", homeJson.encodeToString(cleanMap, cleanVersions.toMap())).apply() }
+        _search.update { it.copy(tracks = withCleanVersions(it.tracks)) }
         // Both versions stay: the clean one goes right after the explicit one wherever that is saved.
         fun List<Track>.withClean(): List<Track> {
             if (none { it.isrc == song.isrc }) return this
