@@ -55,7 +55,7 @@ internal fun SpotMiniPlayer(track: Track, player: MusicPlayer, playing: Boolean,
                 Text(track.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(if (opening || awaiting) "Connecting…" else (if (track.isExplicit == true) "E · " else "") + track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            SIcon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save song", tint = if (saved) Green else Color.White, size = 24.dp, onClick = onSave)
+            SaveToggle(saved, "Save song", size = 24.dp, onClick = onSave)
             if (opening || awaiting) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { SkeletonPulse { Box(Modifier.size(24.dp).background(Color.White.copy(alpha = .25f), CircleShape)) } }
             else SIcon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", size = 32.dp, onClick = { if (playing) player.pause() else player.resume() })
         }
@@ -125,9 +125,6 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                             caption = if (podcast && subtitles.generated) "Auto-generated subtitles" else if (!podcast && cleanText) "Clean lyrics" else null)
                     } else Box(Modifier.fillMaxSize().clickable(onClickLabel = if (podcast) "Show subtitles" else "Show lyrics") { showWords = true }.semantics { contentDescription = if (podcast) "Cover art, show subtitles" else "Cover art, show lyrics" }) {
                         SArt(track.albumArtUrl, Modifier.fillMaxSize())
-                        Surface(Modifier.align(Alignment.BottomCenter).padding(10.dp), shape = CircleShape, color = Color.Black.copy(alpha = .58f), contentColor = Color.White) {
-                            Text(if (podcast) "Tap for subtitles" else "Tap for lyrics", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
-                        }
                     }
                 }
             }
@@ -139,7 +136,7 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                         Text(track.artist, color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { artistTap(track) })
                     }
                 }
-                SIcon(if (track.isrc in favorites) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save song", tint = if (track.isrc in favorites) Green else Color.White, size = 28.dp, onClick = onSave)
+                SaveToggle(track.isrc in favorites, "Save song", size = 28.dp, onClick = onSave)
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                 SpotSeekBar(value = dragging ?: (position.toFloat() / duration).coerceIn(0f, 1f), onChange = { dragging = it }, onFinished = { dragging?.let { vm.player.seekTo((it * duration).toLong()) }; dragging = null }, onCancel = { dragging = null })

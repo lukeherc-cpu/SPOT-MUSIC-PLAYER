@@ -112,7 +112,7 @@ fun AboutScreen(
                 Text(version, style = MaterialTheme.typography.titleSmall, color = ink(0.85f), modifier = Modifier.padding(top = 4.dp))
             }
             Text(
-                "Spot Music · based on Gamut by serptail.\nSpotify catalog discovery powered by SpotAPI.",
+                "Cadence · based on Gamut by serptail.\nSpotify catalog discovery powered by SpotAPI.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = ink(0.7f),
                 textAlign = TextAlign.Center,

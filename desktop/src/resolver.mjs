@@ -29,7 +29,7 @@ export class Resolver {
           const format=hls?'bestaudio[protocol^=m3u8]/worst[protocol^=m3u8]/bestaudio':codec==='opus'?'bestaudio[acodec=opus][ext=webm]/bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio':'bestaudio[ext=m4a]/bestaudio[acodec=opus]/bestaudio/best';
           let stdout;
           try{({stdout}=await this.run(this.binary,['--no-playlist','--no-warnings','--socket-timeout','15','--js-runtimes',`node:${this.runtime}`,'--extractor-args',`youtube:player_client=${hls?'web_safari':'visionos'}`,'--dump-single-json','-f',format,'--',target],{timeout:55000,maxBuffer:12e6,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}}));}
-          catch(e){console.warn('Music lookup error:',String(e.stderr||e.message).replace(/https?:\/\/\S+/g,'[url]').slice(-1000));throw Error('Could not find an available music stream. Try another song or update Spot Music.');}
+          catch(e){console.warn('Music lookup error:',String(e.stderr||e.message).replace(/https?:\/\/\S+/g,'[url]').slice(-1000));throw Error('Could not find an available music stream. Try another song or update Cadence.');}
           const data=JSON.parse(stdout),item=data.entries?.[0]||data;
           const u=new URL(item.url);if(u.protocol!=='https:'||!(u.hostname.endsWith('.googlevideo.com')))throw Error('The music provider returned an unsupported stream.');
           targetId=/^[A-Za-z0-9_-]{11}$/.test(item.id)?item.id:targetId;

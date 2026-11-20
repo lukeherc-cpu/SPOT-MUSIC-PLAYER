@@ -1,6 +1,6 @@
 # Desktop attribution
 
-Spot Music is based on serptail/Gamut (AGPL-3.0). The native Spotify catalog adapter follows Aran404/SpotAPI and retains its GPL-3.0-only notice. Spotify provides metadata, not the audio played by this app.
+Cadence is based on serptail/Gamut (AGPL-3.0). The native Spotify catalog adapter follows Aran404/SpotAPI and retains its GPL-3.0-only notice. Spotify provides metadata, not the audio played by this app.
 
 - Gamut: https://github.com/serptail/gamut — AGPL-3.0.
 - SpotAPI: https://github.com/Aran404/SpotAPI — GPL-3.0. Its license and the project's AGPL text are included with every desktop package.
@@ -9,7 +9,7 @@ Spot Music is based on serptail/Gamut (AGPL-3.0). The native Spotify catalog ada
 - fast-xml-parser: https://github.com/NaturalIntelligence/fast-xml-parser — MIT.
 - hls.js: https://github.com/video-dev/hls.js — BSD-2-Clause; its license is bundled. HLS manifests, keys and segments are served through opaque app URLs and verified public HTTPS requests.
 
-The app has no torrent client and needs no separate server. Anonymous Spotify browsing cannot access private playlists or Spotify's account-specific Daily Mixes. Spot Music builds its own mixes from locally stored listening history and public Spotify metadata.
+The app has no torrent client and needs no separate server. Anonymous Spotify browsing cannot access private playlists or Spotify's account-specific Daily Mixes. Cadence builds its own mixes from locally stored listening history and public Spotify metadata.
 # Offline subtitles
 
 Whisper Tiny model weights are MIT licensed by OpenAI. whisper.cpp v1.9.5 is MIT licensed by the ggml authors. Both licenses are bundled in the application. The model and native source downloads are pinned and SHA256 verified by `scripts/prepare_speech.py`.

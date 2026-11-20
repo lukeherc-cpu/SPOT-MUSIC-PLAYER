@@ -1,4 +1,4 @@
-# Spot Music desktop
+# Cadence desktop
 
 One Electron desktop app packaged for Windows x64, macOS Intel/Apple Silicon and Linux x64. This is a local desktop application, with no separately hosted service. Libraries are currently local to each installation.
 

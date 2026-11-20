@@ -34,7 +34,8 @@ export async function browse(catalog,name){
   if(name==='Charts'){const chart=await catalog.collection(US.uri);return{title:name,subtitle:'Top charts in the US and around the world',rails:[{title:'Top charts in the US',cards:[{...US,artwork:chart.artwork||US.artwork}]},{title:'Around the world',cards:[GLOBAL]}],tracks:chart.tracks.slice(0,10)};}
   const year=new Date().getFullYear(), genre=category[3];
   const primary=await catalog.search(category[2]), releases=await catalog.search(genre?`genre:${genre} year:${year}`:`year:${year}`);
-  const featured=name==='Music'?[fresh,hits]:name==='New releases'?[fresh]:name==='Pop'?[hits]:name==='Hip-Hop'?[rap]:[];
+  // These editorial playlists are known by id only, so fetch their covers up front instead of on first open.
+  const featured=await Promise.all((name==='Music'?[fresh,hits]:name==='New releases'?[fresh]:name==='Pop'?[hits]:name==='Hip-Hop'?[rap]:[]).map(async c=>c.artwork?c:{...c,artwork:await catalog.cover(c.uri).catch(()=>null)}));
   return {title:name,subtitle:genre?`Explore ${name.toLowerCase()} playlists, albums and songs`:'Discover new music',rails:[{title:'Start here',cards:featured},{title:genre?`${name} playlists`:'Discover something new',cards:primary.playlists},{title:genre?`New in ${name}`:'New albums and singles',cards:releases.albums},{title:'Albums to explore',cards:primary.albums}].filter(x=>x.cards.length),tracks:genre?(await catalog.search(`genre:${genre}`)).tracks:primary.tracks};
 }
 export async function albumForTrack(catalog,song){

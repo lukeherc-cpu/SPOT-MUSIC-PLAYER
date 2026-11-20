@@ -9,7 +9,7 @@ import {publicAddress} from '../src/public-network.mjs';
 import {Store} from '../src/store.mjs';
 import {Resolver,rewriteManifest} from '../src/resolver.mjs';
 import {recommendations,browse,albumForTrack,US,seedArtists,radio} from '../src/discovery.mjs';
-import {parseTranscript,cleanVersion,cleanLyricText,decoderInput} from '../src/subtitles.mjs';
+import {parseTranscript,cleanVersion,cleanLyricText,decoderInput,lyrics,pickLyrics} from '../src/subtitles.mjs';
 import {Readable} from 'node:stream';
 import {get} from 'node:http';
 
@@ -162,4 +162,35 @@ test('radio mixes the seed artist with related artists and skips what is already
   assert.equal(new Set(ids).size,ids.length);
   assert.match(result.subtitle,/Pal/);
   await assert.rejects(()=>radio({search:async()=>({tracks:[],artists:[]})},{artist:'Nobody'}),/Couldn't build a radio/);
+});
+
+test('lyrics use the primary artist, skip the album name and fall back to a ranked search',async()=>{
+  const asked=[];
+  const read=async url=>{asked.push(url);const u=new URL(url);
+    if(u.pathname.endsWith('/get'))throw Error('Publisher returned HTTP 404.');
+    if(u.searchParams.get('track_name'))return JSON.stringify([
+      {trackName:'Little Lion Man',artistName:'Someone Else',duration:245,syncedLyrics:'[00:01.00]wrong'},
+      {trackName:'Little Lion Man',artistName:'Mumford & Sons',duration:246,plainLyrics:'plain'},
+      {trackName:'Little Lion Man',artistName:'Mumford & Sons',duration:245.2,syncedLyrics:'[00:01.00]Weep for yourself\n[00:04.50]my man'}]);
+    return '[]';};
+  const track={isrc:'spotify:x',title:'Little Lion Man - Remastered',artist:'Mumford & Sons, Guest',album:'Sigh No More (Deluxe)',durationMs:245000,isExplicit:true};
+  const out=await lyrics(track,read);
+  assert.equal(out.timed,true);assert.deepEqual(out.cues.map(x=>x.text),['Weep for yourself','my man']);assert.equal(out.cues[0].endMs,4500);
+  const first=new URL(asked[0]);assert.equal(first.searchParams.get('artist_name'),'Mumford & Sons');assert.equal(first.searchParams.get('track_name'),'Little Lion Man');assert.equal(first.searchParams.has('album_name'),false);
+  const none=await lyrics({...track,title:'Nothing'},async()=>{throw Error('Publisher returned HTTP 404.');});
+  assert.equal(none.cues.length,0);assert.match(none.error,/No lyrics found/);
+  await assert.rejects(lyrics(track,async()=>{throw Error('getaddrinfo ENOTFOUND');}));
+  assert.equal(pickLyrics([{trackName:'Other',artistName:'Mumford & Sons',duration:245,plainLyrics:'x'}],track),null);
+});
+
+test('smart search puts an exact podcast or artist above songs that share the title, and pairs clean versions',async()=>{
+  const {topResult,pairVersions,withCleanVersion}=await import('../src/search.mjs');
+  const songs=['A','B','C'].map(x=>({isrc:x,title:'The Journal',artist:x}));
+  assert.equal(topResult('the journal',{tracks:songs,shows:[{title:'The Journal.',author:'The Wall Street Journal',feedUrl:'https://x'}]}).kind,'podcast');
+  assert.equal(topResult('daft punk',{tracks:[{isrc:'s',title:'Something',artist:'Daft Punk'}],artists:[{title:'Daft Punk',uri:'spotify:artist:x'}]}).kind,'artist');
+  assert.equal(topResult('little lion man',{tracks:[{isrc:'e',title:'Little Lion Man',artist:'Mumford & Sons'}],shows:[{title:'Lion Talk',feedUrl:'https://y'}]}).kind,'song');
+  const e={isrc:'e',title:'Little Lion Man',artist:'Mumford & Sons',isExplicit:true},c={isrc:'c',title:'Little Lion Man',artist:'Mumford & Sons',isExplicit:false},o={isrc:'o',title:'Other',artist:'X'};
+  assert.deepEqual(pairVersions([e,o,c]).map(x=>x.isrc),['e','c','o']);
+  const catalog={search:async()=>({tracks:[e,{...c,isrc:'c2'}]})};
+  assert.deepEqual((await withCleanVersion(catalog,[e,o])).map(x=>x.isrc),['e','c2','o']);
 });

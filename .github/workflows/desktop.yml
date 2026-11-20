@@ -1,4 +1,4 @@
-name: Spot Music desktop builds
+name: Cadence desktop builds
 on:
   push:
     branches: [main]
@@ -30,7 +30,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --draft \
-              --title "Spot Music desktop alpha ${GITHUB_RUN_NUMBER}" \
+              --title "Cadence desktop alpha ${GITHUB_RUN_NUMBER}" \
               --notes-file desktop/RELEASE_NOTES.md
           fi
   desktop:

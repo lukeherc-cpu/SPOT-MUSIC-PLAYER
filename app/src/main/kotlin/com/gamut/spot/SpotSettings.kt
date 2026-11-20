@@ -2,6 +2,8 @@ package com.gamut.spot
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,6 +13,8 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.gamut.BuildConfig
@@ -23,10 +27,36 @@ internal fun SpotSettings(vm: SpotViewModel, onBack: () -> Unit, onImport: () ->
     val updates = remember(context) { updateChannel(context) }
     var quality by remember { mutableStateOf(false) }
     var license by remember { mutableStateOf<String?>(null) }
+    val pickPhoto = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.setProfilePhoto(uri) }
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item { Row { SIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack); Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp)) } }
         item { SHeading("Your library") }
         item { MenuRow(Icons.Outlined.Download, "Import from Spotify", onImport) }
+        item { SHeading("Profile") }
+        item {
+            ListItem(leadingContent = { SAvatar { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) } },
+                headlineContent = { Text("Profile picture") }, supportingContent = { Text(if (SpotProfile.photo != null) "Tap to change" else "Add a photo from your gallery", color = Muted) },
+                trailingContent = { if (SpotProfile.photo != null) TextButton(onClick = vm::removeProfilePhoto) { Text("Remove") } },
+                modifier = Modifier.clickable { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+        }
+        item { SHeading("Appearance") }
+        item {
+            ListItem(headlineContent = { Text("Accent color") }, supportingContent = {
+                Column {
+                    Text("Purple by default", color = Muted)
+                    Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        listOf(268f to "Purple", 215f to "Blue", 172f to "Teal", 140f to "Green", 28f to "Orange", 340f to "Pink").forEach { (hue, name) ->
+                            val on = kotlin.math.abs(SpotAccent.hue - hue) < .5f
+                            androidx.compose.foundation.layout.Box(Modifier.size(34.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color.hsl(hue, .7f, .72f))
+                                .then(if (on) Modifier.border(2.dp, androidx.compose.ui.graphics.Color.White, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                                .clickable(onClickLabel = "Use $name accent") { SpotAccent.save(context, hue) }
+                                .semantics { contentDescription = "$name accent"; selected = on })
+                        }
+                    }
+                    Slider(value = SpotAccent.hue, onValueChange = { SpotAccent.hue = it }, onValueChangeFinished = { SpotAccent.save(context, SpotAccent.hue) }, valueRange = 0f..359f, modifier = Modifier.semantics { contentDescription = "Accent hue" })
+                }
+            })
+        }
         item { SHeading("Audio quality") }
         item { ListItem(headlineContent = { Text("Streaming quality") }, supportingContent = { Text(settings.streamQuality.label, color = Muted) }, modifier = Modifier.clickable { quality = true }) }
         item { SettingSwitch("Preload upcoming songs", "Prepare sources before you tap play", settings.preload) { value -> vm.playbackSettings.update { it.copy(preload = value) } } }
@@ -34,7 +64,7 @@ internal fun SpotSettings(vm: SpotViewModel, onBack: () -> Unit, onImport: () ->
         item { SettingSwitch("Skip silence", "Skip silent sections during playback", settings.skipSilence) { value -> vm.playbackSettings.update { it.copy(skipSilence = value) } } }
         item { SettingSwitch("Mono audio", "Play the same audio in both channels", settings.mono) { value -> vm.playbackSettings.update { it.copy(mono = value) } } }
         item { SHeading("About") }
-        item { ListItem(headlineContent = { Text("Spot Music") }, supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}", color = Muted) }) }
+        item { ListItem(headlineContent = { Text("Cadence") }, supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}", color = Muted) }) }
         item { ListItem(headlineContent = { Text("Signing identity") }, supportingContent = { Text("$updates · updates must use the same signing key. Keep this app installed if an update is rejected.", color = Muted) }) }
         item { ListItem(headlineContent = { Text("Gamut · AGPL-3.0") }, supportingContent = { Text("Playback foundation and original project", color = Muted) }, modifier = Modifier.clickable { license = "Gamut-AGPL-3.0.txt" }) }
         item { ListItem(headlineContent = { Text("Aran404/SpotAPI · GPL-3.0") }, supportingContent = { Text("Spotify catalog and collection protocol adaptation", color = Muted) }, modifier = Modifier.clickable { license = "SpotAPI-GPL-3.0.txt" }) }

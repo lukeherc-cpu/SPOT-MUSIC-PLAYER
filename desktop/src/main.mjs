@@ -10,10 +10,13 @@ import {browse,recommendations,albumForTrack,radio} from './discovery.mjs';
 import {searchPodcasts,episodes} from './podcasts.mjs';
 import {ArtworkCache} from './artwork.mjs';
 import {SubtitleEngine,lyrics} from './subtitles.mjs';
+import {fold,topResult,withCleanVersion} from './search.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 protocol.registerSchemesAsPrivileged([{scheme:'spot',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-audio',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-art',privileges:{standard:true,secure:true,corsEnabled:true}}]);
-if(process.env.SPOT_TEST_DATA)app.setPath('userData',process.env.SPOT_TEST_DATA);
+// The app was renamed from Spot Music to Cadence. Keep the existing data folder
+// so libraries, likes and caches carry over.
+if(process.env.SPOT_TEST_DATA)app.setPath('userData',process.env.SPOT_TEST_DATA);else app.setPath('userData',path.join(app.getPath('appData'),'Spot Music'));
 const single=app.requestSingleInstanceLock();if(!single&&!process.env.SPOT_TEST_DATA)app.quit();
 let win,store,resolver,subtitles;const catalog=new Catalog();
 const string=(value,max=300)=>{if(typeof value!=='string'||value.length>max)throw Error('Invalid request.');return value;};
@@ -28,9 +31,17 @@ async function dispatch(command,value){
   switch(command){
     case'library':return store.snapshot();
     case'version':return app.getVersion();
-    case'search':{const q=string(value);const [music,podcasts]=await Promise.allSettled([catalog.search(q),searchPodcasts(q)]);return{...(music.status==='fulfilled'?music.value:{tracks:[],albums:[],artists:[],playlists:[],notice:'Spotify search is unavailable. Try again.'}),shows:podcasts.status==='fulfilled'?podcasts.value:[],podcastNotice:podcasts.status==='rejected'?'Podcast directory is unavailable. Try again.':null};}
+    case'search':{
+      const q=string(value);const [music,podcasts]=await Promise.allSettled([catalog.search(q),searchPodcasts(q)]);
+      const found=music.status==='fulfilled'?{...music.value}:{tracks:[],albums:[],artists:[],playlists:[],top:[],notice:'Spotify search is unavailable. Try again.'};
+      let shows=podcasts.status==='fulfilled'?podcasts.value:[];
+      // When Spotify's own top result is a podcast, make sure that show is in the playable podcast list.
+      const spotifyTop=found.top?.[0];
+      if(spotifyTop?.kind==='podcast'&&!shows.some(x=>fold(x.title)===fold(spotifyTop.title))){try{const exact=(await searchPodcasts(spotifyTop.title)).find(x=>fold(x.title)===fold(spotifyTop.title));if(exact)shows=[exact,...shows.filter(x=>x.feedUrl!==exact.feedUrl)];}catch{}}
+      found.tracks=await withCleanVersion(catalog,found.tracks||[]);
+      return{...found,shows,top:topResult(q,{...found,shows}),podcastNotice:podcasts.status==='rejected'?'Podcast directory is unavailable. Try again.':null};}
     case'home':if(value===true){homeAt=0;homeNonce++;}return home();
-    case'licenses':{const dir=app.isPackaged?path.join(process.resourcesPath,'licenses'):path.resolve(here,'../../docs/licenses');const agpl=app.isPackaged?path.join(dir,'Spot-Music-AGPL-3.0.txt'):path.resolve(here,'../../LICENSE');return (await readFile(agpl,'utf8'))+'\n\nSPOTAPI\n'+(await readFile(path.join(dir,'SpotAPI-GPL-3.0.txt'),'utf8'));}
+    case'licenses':{const dir=app.isPackaged?path.join(process.resourcesPath,'licenses'):path.resolve(here,'../../docs/licenses');const agpl=app.isPackaged?path.join(dir,'Cadence-AGPL-3.0.txt'):path.resolve(here,'../../LICENSE');return (await readFile(agpl,'utf8'))+'\n\nSPOTAPI\n'+(await readFile(path.join(dir,'SpotAPI-GPL-3.0.txt'),'utf8'));}
     case'browse':return value==='Podcasts'?{title:'Podcasts',subtitle:'Find your next favorite show',shows:await searchPodcasts('popular')}:browse(catalog,string(value));
     case'collection':return catalog.collection(resource(string(value,500)));
     case'album':return albumForTrack(catalog,cleanTrack(value));
@@ -51,13 +62,14 @@ async function dispatch(command,value){
     case'lyrics':{let track=cleanTrack(value);if(track.isExplicit===null&&track.source==='SPOTIFY'){try{const match=(await catalog.search(`${track.artist} ${track.title}`)).tracks.find(x=>x.isrc===track.isrc);if(match)track={...track,isExplicit:match.isExplicit};}catch{}}return lyrics(track);}
     case'record':await store.record(value);homeAt=0;return true;
     case'position':{const id=string(value.id,160),position=Number(value.value);if(!Number.isFinite(position)||position<0||position>86400000)throw Error('Invalid playback position.');await store.change(s=>{s.positions[id]=position;const keys=Object.keys(s.positions);if(keys.length>1000)delete s.positions[keys[0]];});return true;}
+    case'delete-playlist':{const id=string(value,100);return store.change(s=>{s.playlists=s.playlists.filter(x=>x.id!==id);});}
     case'create':{const name=string(value,100).trim();if(!name)throw Error('Enter a playlist name.');return store.change(s=>s.playlists.unshift({id:randomUUID(),title:name,tracks:[],createdAt:Date.now()}));}
     case'append':{const id=string(value.id,100),track=cleanTrack(value.track);return store.change(s=>{const playlist=s.playlists.find(x=>x.id===id);if(!playlist)throw Error('Playlist not found.');if(!playlist.tracks.some(t=>t.isrc===track.isrc))playlist.tracks.push(track);});}
     default:throw Error('Unknown command.');
   }
 }
 function createWindow(){
-  win=new BrowserWindow({width:1420,height:940,minWidth:900,minHeight:620,backgroundColor:'#121212',title:'Spot Music',icon:path.join(here,'../resources/icon.png'),autoHideMenuBar:true,webPreferences:{preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
+  win=new BrowserWindow({width:1420,height:940,minWidth:900,minHeight:620,backgroundColor:'#121212',title:'Cadence',icon:path.join(here,'../resources/icon.png'),autoHideMenuBar:true,webPreferences:{preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('spot://app/'))event.preventDefault();});
   win.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
@@ -89,7 +101,7 @@ app.whenReady().then(async()=>{
     try{return{ok:true,value:await dispatch(command,value)};}catch(e){return{ok:false,error:e.message||'Something went wrong. Try again.'};}
   });
   createWindow();
-}).catch(error=>{console.error('Could not start Spot Music:',error.message);app.exit(1);});
+}).catch(error=>{console.error('Could not start Cadence:',error.message);app.exit(1);});
 app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.focus();}});
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});
 app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});

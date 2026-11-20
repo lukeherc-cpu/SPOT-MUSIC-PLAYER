@@ -53,13 +53,13 @@ jobs:
           import {execFileSync} from 'node:child_process';
           import {createHash} from 'node:crypto';
           import {extractFile} from '@electron/asar';
-          const base='dist/mac-arm64/Spot Music.app/Contents';
+          const base='dist/mac-arm64/Cadence.app/Contents';
           const root=base+'/Resources';
-          for(const file of ['app.asar','resolver/VERSION.json','licenses/Spot-Music-AGPL-3.0.txt','licenses/SpotAPI-GPL-3.0.txt'])if((await stat(root+'/'+file)).size<10)throw Error('Missing packaged resource: '+file);
+          for(const file of ['app.asar','resolver/VERSION.json','licenses/Cadence-AGPL-3.0.txt','licenses/SpotAPI-GPL-3.0.txt'])if((await stat(root+'/'+file)).size<10)throw Error('Missing packaged resource: '+file);
           const manifest=JSON.parse(await readFile(root+'/resolver/VERSION.json','utf8'));
           const binary=await readFile(root+'/resolver/yt-dlp');
           if(createHash('sha256').update(binary).digest('hex')!==manifest.sha256)throw Error('Resolver checksum mismatch');
-          for(const file of [base+'/MacOS/Spot Music',root+'/resolver/yt-dlp'])if(!execFileSync('lipo',['-archs',file],{encoding:'utf8'}).includes('arm64'))throw Error('ARM64 architecture missing');
+          for(const file of [base+'/MacOS/Cadence',root+'/resolver/yt-dlp'])if(!execFileSync('lipo',['-archs',file],{encoding:'utf8'}).includes('arm64'))throw Error('ARM64 architecture missing');
           const metadata=JSON.parse(extractFile(root+'/app.asar','package.json').toString());
           if(metadata.version!=='0.2.0-alpha.3')throw Error('Wrong package version');
           console.log('ARM64 app, universal resolver, archive version and bundled licenses verified. Native ARM64 runtime test remains queued.');

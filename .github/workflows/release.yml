@@ -1,4 +1,4 @@
-name: Spot Music Android build
+name: Cadence Android build
 on:
   push:
     branches: [main]
@@ -126,9 +126,9 @@ jobs:
             -Pgamut.versionName="0.1.0-alpha.${GITHUB_RUN_NUMBER}" \
             -Pgamut.versionCode="$((10000 + GITHUB_RUN_NUMBER))" \
             -Pgamut.repo="$GITHUB_REPOSITORY" -Pgamut.abis=arm64-v8a
-          cp app/build/outputs/apk/release/app-release.apk Spot-Music-Android.apk
-          sha256sum Spot-Music-Android.apk > SHA256SUMS.txt
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs Spot-Music-Android.apk > SIGNING-IDENTITY.txt
+          cp app/build/outputs/apk/release/app-release.apk Cadence-Android.apk
+          sha256sum Cadence-Android.apk > SHA256SUMS.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs Cadence-Android.apk > SIGNING-IDENTITY.txt
           python3 -c "from pathlib import Path; expected=Path('.github/android-signing.sha256').read_text().strip(); assert expected in Path('SIGNING-IDENTITY.txt').read_text(), 'Signing identity changed; do not publish an incompatible update'"
       - name: Preserve UI previews and test reports
         if: always()
@@ -149,7 +149,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > release-notes.md <<'NOTES'
-          Android alpha of Spot Music, based on Gamut, with Spotify catalog discovery adapted from Aran404/SpotAPI.
+          Android alpha of Cadence, based on Gamut, with Spotify catalog discovery adapted from Aran404/SpotAPI.
 
           - Uses the retained local signing identity and a higher version code. Old GitHub alphas used unretained, changing debug keys and cannot receive an in-place update without their original private key. Keep the old app installed if you need its library.
           - Automatic offline podcast subtitles with bundled multilingual Whisper Tiny when publisher transcripts are missing.
@@ -172,8 +172,8 @@ jobs:
           - Progressive music search, earlier source prefetch and a smaller initial audio buffer.
           - Thin player seek bar with a round thumb and artwork failure placeholders.
 
-          Install Spot-Music-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and the previous Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
+          Install Cadence-Android.apk on an ARM64 Android 8+ device. This uses a separate package from Gamut and from the older standalone Cadence app. Development-signed alpha; source is provided in this repository under AGPL-3.0 with SpotAPI attribution and GPL-3.0 license retained.
           NOTES
-          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Spot-Music-Android.apk SHA256SUMS.txt SIGNING-IDENTITY.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png ui-save.png ui-lyrics.png ui-artist.png ui-song-menu.png ui-queue.png \
+          gh release create "spot-alpha-${GITHUB_RUN_NUMBER}" Cadence-Android.apk SHA256SUMS.txt SIGNING-IDENTITY.txt ui-home.png ui-search.png ui-podcasts.png ui-library.png ui-playlist.png ui-player.png ui-import.png ui-charts.png ui-save.png ui-lyrics.png ui-artist.png ui-song-menu.png ui-queue.png \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "Spot Music Android alpha ${GITHUB_RUN_NUMBER}" --notes-file release-notes.md
+            --title "Cadence Android alpha ${GITHUB_RUN_NUMBER}" --notes-file release-notes.md

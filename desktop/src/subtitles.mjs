@@ -7,6 +7,7 @@ import path from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {readPublic,secureUrl,publicRequest} from './public-network.mjs';
 import {episodes} from './podcasts.mjs';
+import {fold,plainTitle} from './search.mjs';
 
 const run=promisify(execFile),WINDOW=20000;
 // Native static decoders can crash in host DNS/TLS libraries. Node owns validated
@@ -117,10 +118,30 @@ export class SubtitleEngine{
 const profanity=/(?<![\p{L}\p{N}])(?:motherfuck(?:er|ers|ing)?|fuck(?:s|ed|er|ers|in|ing)?|bullshit|horseshit|shit(?:s|ty|ting|head)?|bitch(?:es|y|ing)?|ass(?:es|hole|holes)?|bastard(?:s)?|cunt(?:s)?|dick(?:s|head)?|cock(?:s|sucker|suckers)?|puss(?:y|ies)|whore(?:s)?|slut(?:s)?|nigg(?:a|as|er|ers)|fag(?:s|got|gots)?|damn(?:ed)?|goddamn(?:ed)?|piss(?:ed|ing)?|tits?|twat(?:s)?)(?![\p{L}\p{N}])/giu;
 export const cleanVersion=track=>track.isExplicit===false||/\b(clean(?: version| edit)?|censored|non[ -]?explicit|no swearing)\b/i.test(track.title);
 export const cleanLyricText=text=>String(text).replace(profanity,'•••');
-export async function lyrics(track){
-  const title=track.title.replace(/\s*[(\[][^)\]]*(?:clean|explicit|official|lyrics?)[^)\]]*[)\]]/gi,'').replace(/\s+-\s+clean.*$/i,'').trim();
-  const query=new URLSearchParams({track_name:title,artist_name:track.artist,duration:String(Math.round(track.durationMs/1000)),...(track.album?{album_name:track.album}:{})});
-  const result=JSON.parse(await readPublic('https://lrclib.net/api/get?'+query,3e6));
+// Read JSON from LRCLIB. A 404 means "no match" and is not an error.
+async function lrclib(read,pathAndQuery){
+  try{return JSON.parse(await read('https://lrclib.net/api/'+pathAndQuery,3e6));}
+  catch(error){if(/HTTP 404/.test(error.message))return null;throw error;}
+}
+export function pickLyrics(rows,track){
+  const title=fold(plainTitle(track.title)),artists=String(track.artist).split(/,\s*/).map(fold),seconds=track.durationMs/1000;
+  const score=row=>{if(!row||row.instrumental||!(row.syncedLyrics||row.plainLyrics))return -1;let points=0;const name=fold(plainTitle(row.trackName||row.name));if(name===title)points+=4;else if(name.includes(title)||title.includes(name))points+=2;else return -1;const artist=fold(row.artistName);if(artists.some(a=>a&&(artist.includes(a)||a.includes(artist))))points+=3;else return -1;const off=Math.abs((Number(row.duration)||0)-seconds);if(seconds&&off<=3)points+=3;else if(seconds&&off<=10)points+=1;else if(seconds&&off>20)return -1;if(row.syncedLyrics)points+=2;return points;};
+  return (rows||[]).map(row=>({row,points:score(row)})).filter(x=>x.points>=0).sort((a,b)=>b.points-a.points)[0]?.row||null;
+}
+// Spotify joins several artists with commas and adds edition words to album
+// names, while LRCLIB's exact lookup needs one artist and the canonical album.
+// Try the exact lookup with the primary artist first, then a ranked search.
+export async function lyrics(track,read=readPublic){
+  const title=plainTitle(track.title),primary=String(track.artist).split(/,\s*/)[0],seconds=Math.round(track.durationMs/1000);
+  const exact=new URLSearchParams({track_name:title,artist_name:primary,...(seconds?{duration:String(seconds)}:{})});
+  let result=await lrclib(read,'get?'+exact);
+  if(!result?.syncedLyrics&&!result?.plainLyrics){
+    const found=await lrclib(read,'search?'+new URLSearchParams({track_name:title,artist_name:primary}));
+    let best=pickLyrics(found,track);
+    if(!best){const loose=await lrclib(read,'search?'+new URLSearchParams({q:`${title} ${primary}`}));best=pickLyrics(loose,track);}
+    if(best)result=best;
+  }
+  if(!result?.syncedLyrics&&!result?.plainLyrics)return{trackId:track.isrc,cues:[],timed:false,clean:cleanVersion(track),working:false,error:'No lyrics found for this song.'};
   let cues=[],timed=false;
   if(result.syncedLyrics){timed=true;for(const line of result.syncedLyrics.split('\n')){const m=line.match(/\[(\d+):(\d+(?:\.\d+)?)\](.*)/);if(m)cues.push({startMs:(Number(m[1])*60+Number(m[2]))*1000,text:m[3].trim()});}cues=cues.map((cue,i)=>({...cue,endMs:cues[i+1]?.startMs||track.durationMs}));}
   else cues=String(result.plainLyrics||'').split('\n').filter(Boolean).map(text=>({startMs:0,endMs:0,text}));
