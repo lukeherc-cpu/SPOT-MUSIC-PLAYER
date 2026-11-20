@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SearchRankingTest {
-    private fun song(title: String, artist: String = "Someone") = Track("spotify:$title$artist".replace(" ", ""), title = title, artist = artist)
+    private fun song(title: String, artist: String = "Someone") = Track("spotify:$title$artist".replace(" ", ""), title = title, artist = artist, durationMs = 200_000)
     private fun card(title: String, type: String) = SpotifyCard("spotify:$type:${title.hashCode()}", title, type, null, type)
     private fun show(title: String) = PodcastShow(title, title, "Publisher", "https://feeds.example/${title.hashCode()}.xml")
 
