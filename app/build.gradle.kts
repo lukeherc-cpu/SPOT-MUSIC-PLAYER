@@ -94,6 +94,7 @@ dependencies {
     implementation(project(":core:core-player"))
     implementation(project(":core:core-designsystem"))
     implementation(project(":core:core-sync"))
+    implementation(libs.androidx.security.crypto)
 
     implementation(project(":feature:feature-search"))
     implementation(project(":feature:feature-library"))

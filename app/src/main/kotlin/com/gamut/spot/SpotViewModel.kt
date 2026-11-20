@@ -27,6 +27,8 @@ data class SpotHome(val mixes: List<DailyMix> = emptyList(), val personal: List<
 data class SpotSearch(val query: String = "", val tracks: List<Track> = emptyList(), val rich: SpotifySearch = SpotifySearch(), val shows: List<PodcastShow> = emptyList(), val youtube: List<Track> = emptyList(), val youtubeLoading: Boolean = false, val youtubeError: String? = null, val musicLoading: Boolean = false, val podcastLoading: Boolean = false, val notice: String? = null, val podcastError: String? = null)
 data class SpotDetail(val key: String, val title: String, val subtitle: String, val artwork: String? = null, val description: String = "", val tracks: List<Track> = emptyList(), val loading: Boolean = false, val error: String? = null, val spotify: SpotifyCollection? = null, val podcast: PodcastShow? = null, val episodes: List<PodcastEpisode> = emptyList(), val skipped: Int = 0)
 
+data class SpotifyAccountState(val signedIn: Boolean = false, val name: String? = null, val loading: Boolean = false, val playlists: List<SpotifyCard> = emptyList(), val mixes: List<SpotifyCard> = emptyList(), val error: String? = null, val progress: String? = null)
+
 data class SpotBrowse(val category: BrowseCategory, val content: BrowseContent = BrowseContent(), val shows: List<PodcastShow> = emptyList(), val loading: Boolean = true, val error: String? = null)
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -51,6 +53,7 @@ class SpotViewModel @Inject constructor(
     val podcastSubtitles: com.gamut.speech.PodcastSubtitles,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val avatars: com.gamut.account.AvatarRepository,
+    private val spotifyAccount: SpotifyAccountStore,
 ) : ViewModel() {
     // Plays per song, kept on this device. Used for "Your most listened to" on artist pages.
     private val plays by lazy { appContext.getSharedPreferences("cadence_play_counts", android.content.Context.MODE_PRIVATE) }
@@ -91,6 +94,9 @@ class SpotViewModel @Inject constructor(
     /** The collection the queue was started from, so its play button can show pause. */
     val playContext = _playContext.asStateFlow()
     private var lyricsJob: Job? = null
+    private val _account = MutableStateFlow(SpotifyAccountState())
+    val account = _account.asStateFlow()
+    private var accountJob: Job? = null
     private val _opening = MutableStateFlow<Track?>(null)
     val opening = _opening.asStateFlow()
     private val _importing = MutableStateFlow(false)
@@ -125,6 +131,9 @@ class SpotViewModel @Inject constructor(
         // Songs played before get their stream links ready in the background, so they start faster.
         viewModelScope.launch { delay(3_000); prefetch.prepareRecent(recents.first { it.isNotEmpty() }.take(6)) }
         viewModelScope.launch { avatars.model(null).collect { SpotProfile.photo = it } }
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyAccount.cookie()?.let { cookie -> catalog.setAccount(cookie); _account.value = SpotifyAccountState(signedIn = true) }
+        }
     }
     // Lyrics start loading as soon as a song plays, not when the cover is flipped. Podcast subtitles already start on play.
     private fun preloadWords(track: Track) {
@@ -468,6 +477,60 @@ class SpotViewModel @Inject constructor(
         }
     }
     fun isImported(uri: String) = uri in imported
+
+    /** Called by the sign-in page once Spotify has signed the listener in. */
+    fun signInSpotify(cookie: String) {
+        viewModelScope.launch(Dispatchers.IO) { spotifyAccount.save(cookie) }
+        catalog.setAccount(cookie)
+        _account.value = SpotifyAccountState(signedIn = true)
+        loadSpotifyLibrary()
+    }
+    fun signOutSpotify() {
+        accountJob?.cancel()
+        catalog.setAccount(null)
+        viewModelScope.launch(Dispatchers.IO) { spotifyAccount.clear() }
+        _account.value = SpotifyAccountState()
+    }
+    fun loadSpotifyLibrary() {
+        if (!_account.value.signedIn || _account.value.progress != null) return
+        accountJob?.cancel()
+        _account.update { it.copy(loading = true, error = null) }
+        accountJob = viewModelScope.launch {
+            try {
+                val name = try { catalog.accountName() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                val playlists = catalog.libraryPlaylists()
+                _account.update { it.copy(name = name, playlists = playlists) }
+                val mixes = catalog.personalMixes()
+                _account.update { it.copy(mixes = mixes, loading = false) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                val expired = e.message?.contains("sign", true) == true
+                _account.update { it.copy(loading = false, error = if (expired) "Your Spotify sign-in has expired. Sign in again." else "Couldn't load your Spotify library. Tap Retry.") }
+            }
+        }
+    }
+    /** Imports the chosen playlists and mixes one at a time, each saved complete or not at all. */
+    fun importSpotifyCards(cards: List<SpotifyCard>) {
+        if (cards.isEmpty() || _account.value.progress != null) return
+        accountJob?.cancel()
+        accountJob = viewModelScope.launch {
+            var done = 0; var failed = 0; var songs = 0
+            try {
+                cards.forEachIndexed { index, card ->
+                    _account.update { it.copy(progress = "Importing ${index + 1} of ${cards.size}: ${card.title}") }
+                    try {
+                        val collection = catalog.collection(card.uri)
+                        if (collection.tracks.isEmpty()) { failed++; return@forEachIndexed }
+                        library.importPlaylist(collection.title, collection.artwork ?: card.artwork, collection.tracks)
+                        imported += card.uri; done++; songs += collection.tracks.distinctBy { it.isrc }.size
+                    } catch (e: CancellationException) { throw e } catch (_: Exception) { failed++ }
+                }
+            } finally {
+                _account.update { it.copy(progress = null) }
+                if (done > 0 || failed > 0) _messages.tryEmit("Imported $done ${if (done == 1) "collection" else "collections"} · $songs songs" + if (failed > 0) " · $failed couldn't be imported" else "")
+            }
+        }
+    }
     /** Swaps an explicit song for its clean version wherever it is: this playlist or Liked Songs, and the queue. */
     fun replaceWithClean(song: Track, collectionKey: String?) = viewModelScope.launch {
         val clean = try { findClean(song) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
