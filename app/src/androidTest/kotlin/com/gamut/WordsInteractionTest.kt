@@ -21,9 +21,9 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class WordsInteractionTest {
-    @Test fun tappingTimedTextReturnsToCoverInBothSizesAndNeverSeeks() {
+    @Test fun tappingTimedTextSeeksToThatLineInBothSizesAndKeepsTheText() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        var seeks = 0
+        val seeks = mutableListOf<Long>()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> activity.setContent {
                 var words by remember { mutableStateOf(true) }
@@ -34,20 +34,23 @@ class WordsInteractionTest {
                     Box(Modifier.fillMaxSize().systemBarsPadding(), contentAlignment = Alignment.Center) {
                         if (!words) Text("Cover fixture", Modifier.clickable { words = true }.padding(24.dp))
                         else SpotWordsPanel("Lyrics", LyricsState.Loaded(listOf(LyricsLine(0, "First timed line", 1000), LyricsLine(1000, "Second timed line", 2000))), 1200, Color.DarkGray, expanded,
-                            { expanded = !expanded }, { expanded = false; words = false }, { seeks++ })
+                            { expanded = !expanded }, { expanded = false; words = false }, { seeks += it })
                     }
                 }
             } }
             assertTrue(device.wait(Until.hasObject(By.textContains("Second timed line")), 5000))
             device.findObject(By.textContains("Second timed line")).click()
-            assertTrue(device.wait(Until.hasObject(By.text("Cover fixture")), 5000))
-            device.findObject(By.text("Cover fixture")).click()
-            assertTrue(device.wait(Until.hasObject(By.desc("Expand Lyrics")), 5000))
+            device.waitForIdle()
+            assertEquals(listOf(1000L), seeks)
+            assertFalse(device.hasObject(By.text("Cover fixture")))
             device.findObject(By.desc("Expand Lyrics")).click()
             assertTrue(device.wait(Until.hasObject(By.desc("Minimize text")), 5000))
             device.findObject(By.textContains("First timed line")).click()
+            device.waitForIdle()
+            assertEquals(listOf(1000L, 0L), seeks)
+            assertTrue(device.hasObject(By.desc("Minimize text")))
+            device.findObject(By.desc("Show cover art")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Cover fixture")), 5000))
-            assertEquals(0, seeks)
         }
     }
 }
