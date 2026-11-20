@@ -7,6 +7,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -141,7 +142,7 @@ private fun RightArtistTabs(labels: List<String>, selected: Int, onDrag: (Int) -
             val distance = kotlin.math.abs((index + .5f) * height / labels.size - (dragY ?: indicator)) / (height.toFloat() / labels.size)
             val wave = if (dragY == null) 0f else kotlin.math.exp(-distance * distance * 1.7f)
             val shift by animateFloatAsState(wave, spring(stiffness = Spring.StiffnessMediumLow), label = "artist rail wave")
-            Box(Modifier.weight(1f).fillMaxWidth().clickable { onSelect(index) }.semantics { role = Role.Tab; this.selected = selected == index; contentDescription = "$label artist section" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth().selectable(selected = selected == index, role = Role.Tab) { onSelect(index) }.semantics { contentDescription = "$label artist section" }, contentAlignment = Alignment.Center) {
                 Text(label, color = color, style = MaterialTheme.typography.titleMedium, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false,
                     modifier = Modifier.graphicsLayer { translationX = -24.dp.toPx() * shift; scaleX = 1 + .12f * shift; scaleY = 1 + .12f * shift }.layout { measurable, _ -> val p = measurable.measure(Constraints()); layout(p.height, p.width) { p.place((p.height - p.width) / 2, (p.width - p.height) / 2) } }.rotate(-90f))
             }
