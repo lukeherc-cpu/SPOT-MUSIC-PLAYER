@@ -34,7 +34,7 @@ internal fun SpotSettings(vm: SpotViewModel, onBack: () -> Unit, onImport: () ->
         item { MenuRow(Icons.Outlined.Download, "Import from Spotify", onImport) }
         item { SHeading("Profile") }
         item {
-            ListItem(leadingContent = { SAvatar { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) } },
+            ListItem(leadingContent = { SAvatar(onClick = { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) },
                 headlineContent = { Text("Profile picture") }, supportingContent = { Text(if (SpotProfile.photo != null) "Tap to change" else "Add a photo from your gallery", color = Muted) },
                 trailingContent = { if (SpotProfile.photo != null) TextButton(onClick = vm::removeProfilePhoto) { Text("Remove") } },
                 modifier = Modifier.clickable { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) })

@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.*
 
 data class MusicRail(val title: String, val cards: List<SpotifyCard>)
 data class HomeEpisode(val show: PodcastShow, val episode: PodcastEpisode)
-data class SpotHome(val mixes: List<DailyMix> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val podcastReason: String = "", val episodes: List<HomeEpisode> = emptyList(), val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val podcastsLoading: Boolean = true, val videosLoading: Boolean = true, val error: String? = null)
+data class SpotHome(val mixes: List<DailyMix> = emptyList(), val personal: List<DailyMix> = emptyList(), val newEpisodes: List<HomeEpisode> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val podcastReason: String = "", val episodes: List<HomeEpisode> = emptyList(), val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val podcastsLoading: Boolean = true, val videosLoading: Boolean = true, val error: String? = null)
 data class SpotSearch(val query: String = "", val tracks: List<Track> = emptyList(), val rich: SpotifySearch = SpotifySearch(), val shows: List<PodcastShow> = emptyList(), val youtube: List<Track> = emptyList(), val youtubeLoading: Boolean = false, val youtubeError: String? = null, val musicLoading: Boolean = false, val podcastLoading: Boolean = false, val notice: String? = null, val podcastError: String? = null)
 data class SpotDetail(val key: String, val title: String, val subtitle: String, val artwork: String? = null, val description: String = "", val tracks: List<Track> = emptyList(), val loading: Boolean = false, val error: String? = null, val spotify: SpotifyCollection? = null, val podcast: PodcastShow? = null, val episodes: List<PodcastEpisode> = emptyList(), val skipped: Int = 0)
 
@@ -64,7 +64,15 @@ class SpotViewModel @Inject constructor(
     val recents = recentRepository.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val followedShows = podcastStore.shows
     val followedArtists = artistFollows.followedKeys.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-    private val _home = MutableStateFlow(SpotHome())
+    // The last mixes are kept on the device, so home shows them (and their artwork) at once while fresh ones load.
+    private val homeCache by lazy { appContext.getSharedPreferences("cadence_home", android.content.Context.MODE_PRIVATE) }
+    private val homeJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val mixList = kotlinx.serialization.builtins.ListSerializer(DailyMix.serializer())
+    private fun cachedMixes(key: String): List<DailyMix> {
+        val raw = homeCache.getString(key, null) ?: return emptyList()
+        return runCatching { homeJson.decodeFromString(mixList, raw) }.getOrDefault(emptyList())
+    }
+    private val _home = MutableStateFlow(SpotHome(mixes = cachedMixes("mixes"), personal = cachedMixes("personal")))
     val home = _home.asStateFlow()
     private val _search = MutableStateFlow(SpotSearch())
     val search = _search.asStateFlow()
@@ -76,6 +84,13 @@ class SpotViewModel @Inject constructor(
     private var browseJob: Job? = null
     private var homeRefreshedAt = 0L
     private var homeNonce = 0L
+    private val _newShows = MutableStateFlow<Set<String>>(emptySet())
+    /** Followed shows whose latest episode came out since the listener last opened the show. */
+    val newShows = _newShows.asStateFlow()
+    private val _playContext = MutableStateFlow<String?>(null)
+    /** The collection the queue was started from, so its play button can show pause. */
+    val playContext = _playContext.asStateFlow()
+    private var lyricsJob: Job? = null
     private val _opening = MutableStateFlow<Track?>(null)
     val opening = _opening.asStateFlow()
     private val _importing = MutableStateFlow(false)
@@ -99,7 +114,7 @@ class SpotViewModel @Inject constructor(
                 when (state) {
                     is PlaybackState.Playing -> {
                         if (_opening.value?.isrc == state.track.isrc) _opening.value = null
-                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); lastId = state.track.isrc }
+                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); lastId = state.track.isrc; preloadWords(state.track) }
                     }
                     is PlaybackState.Error -> { _opening.value = null; _messages.tryEmit(state.message) }
                     else -> Unit
@@ -107,7 +122,21 @@ class SpotViewModel @Inject constructor(
             }
         }
         viewModelScope.launch { delay(400); player.warmUp() }
+        // Songs played before get their stream links ready in the background, so they start faster.
+        viewModelScope.launch { delay(3_000); prefetch.prepareRecent(recents.first { it.isNotEmpty() }.take(6)) }
         viewModelScope.launch { avatars.model(null).collect { SpotProfile.photo = it } }
+    }
+    // Lyrics start loading as soon as a song plays, not when the cover is flipped. Podcast subtitles already start on play.
+    private fun preloadWords(track: Track) {
+        if (track.source == TrackSource.PODCAST) { markEpisodePlayed(track); return }
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
+            try { com.gamut.feature.playerui.LyricsRepository.fetchLyrics(lyricTrack(track), track.durationMs) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        }
+    }
+    private fun markEpisodePlayed(track: Track) {
+        val show = followedShows.value.firstOrNull { it.title.equals(track.album, true) } ?: return
+        _home.value.newEpisodes.firstOrNull { it.show.feedUrl == show.feedUrl && it.episode.track(it.show).isrc == track.isrc }?.let { podcastStore.markSeen(show.feedUrl, it.episode.id); _newShows.update { set -> set - show.feedUrl } }
     }
     private fun countPlay(track: Track) {
         if (track.source == TrackSource.PODCAST) return
@@ -138,15 +167,17 @@ class SpotViewModel @Inject constructor(
         val saved = favorites.value
         val rotation = homeRefreshedAt / (30 * 60_000L) + homeNonce++
         homeJob = viewModelScope.launch {
-            _home.update { it.copy(loading = true, podcastsLoading = true, videosLoading = true, error = null) }
+            _home.update { it.copy(loading = it.mixes.isEmpty(), podcastsLoading = true, videosLoading = true, error = null) }
             supervisorScope {
                 launch {
                     try {
                         val result = discovery.recommendations(history, saved, rotation)
                         check(result.mixes.any { it.tracks.isNotEmpty() })
-                        _home.update { it.copy(mixes = result.mixes.filter { mix -> mix.tracks.isNotEmpty() }, rails = result.rails, songs = result.songs, loading = false) }
+                        val mixes = result.mixes.filter { mix -> mix.tracks.isNotEmpty() }
+                        _home.update { it.copy(mixes = mixes, personal = result.personal, rails = result.rails, songs = result.songs, loading = false) }
+                        withContext(Dispatchers.IO) { homeCache.edit().putString("mixes", homeJson.encodeToString(mixList, mixes.map { it.copy(tracks = it.tracks.take(40)) })).putString("personal", homeJson.encodeToString(mixList, result.personal)).apply() }
                     } catch (e: CancellationException) { throw e }
-                    catch (_: Exception) { _home.update { it.copy(loading = false, error = "Couldn't refresh discovery. Your library is still available.") } }
+                    catch (_: Exception) { _home.update { it.copy(loading = false, error = if (it.mixes.isEmpty()) "Couldn't refresh discovery. Your library is still available." else null) } }
                 }
                 launch {
                     try {
@@ -159,6 +190,7 @@ class SpotViewModel @Inject constructor(
                     } catch (e: CancellationException) { throw e } catch (_: Exception) {}
                     finally { if (currentCoroutineContext().isActive) _home.update { it.copy(podcastsLoading = false) } }
                 }
+                launch { refreshNewEpisodes() }
                 launch {
                     try {
                         val artist = SpotDiscovery.seedArtists(history, saved).first()
@@ -170,6 +202,23 @@ class SpotViewModel @Inject constructor(
             }
         }
     }
+    private suspend fun refreshNewEpisodes() {
+        val shows = followedShows.value.take(16)
+        if (shows.isEmpty()) { _home.update { it.copy(newEpisodes = emptyList()) }; _newShows.value = emptySet(); return }
+        val latest = coroutineScope {
+            shows.map { show -> async { try { podcastRepository.episodes(show).firstOrNull()?.let { HomeEpisode(show, it) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null } } }.awaitAll().filterNotNull()
+        }
+        val fresh = latest.filter { item ->
+            when (val seen = podcastStore.seenEpisode(item.show.feedUrl)) {
+                null -> { podcastStore.markSeen(item.show.feedUrl, item.episode.id); false } // First check after following: nothing is new yet.
+                else -> seen != item.episode.id && podcastStore.position(item.episode.track(item.show).isrc) == 0L
+            }
+        }
+        _newShows.value = fresh.mapTo(hashSetOf()) { it.show.feedUrl }
+        _home.update { it.copy(newEpisodes = latest.sortedByDescending { item -> publishedAt(item.episode.published) }) }
+    }
+    private fun publishedAt(value: String): Long = runCatching { java.time.ZonedDateTime.parse(value.trim(), java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }
+        .recoverCatching { java.time.OffsetDateTime.parse(value.trim()).toInstant().toEpochMilli() }.getOrDefault(0L)
     fun openBrowse(category: BrowseCategory) {
         closeDetail()
         _browse.value = SpotBrowse(category, SpotDiscovery.starterContent(category))
@@ -178,6 +227,8 @@ class SpotViewModel @Inject constructor(
                 if (category == BrowseCategory.Podcasts) {
                     val shows = PodcastRecommendations.discover(podcastRepository, recents.value, followedShows.value, System.currentTimeMillis() / 1800000).shows
                     _browse.value = SpotBrowse(category, shows = shows, loading = false)
+                } else if (category.podcast) {
+                    _browse.value = SpotBrowse(category, shows = podcastRepository.search(category.query), loading = false)
                 } else {
                     val content = discovery.browse(category)
                     _browse.value = SpotBrowse(category, content, loading = false)
@@ -344,14 +395,16 @@ class SpotViewModel @Inject constructor(
     private suspend fun loadPodcast(show: PodcastShow, refresh: Boolean = false) {
         try {
             val episodes = podcastRepository.episodes(show, refresh)
+            episodes.firstOrNull()?.let { latest -> if (followedShows.value.any { it.feedUrl == show.feedUrl }) { podcastStore.markSeen(show.feedUrl, latest.id); _newShows.update { it - show.feedUrl } } }
             _detail.value = SpotDetail(show.feedUrl, show.title, show.author, show.artwork, tracks = episodes.map { it.track(show) }, podcast = show, episodes = episodes)
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { _detail.update { it?.copy(loading = false, podcast = show, error = "Couldn't load this publisher's feed. Tap Retry to try again.") } }
     }
     fun closeDetail() { detailJob?.cancel(); browseJob?.cancel(); detailStack.clear(); _detail.value = null; _browse.value = null }
     fun retryDetail() { _detail.value?.let { d -> if (d.podcast != null) openShow(d.podcast, true) else if (d.key.startsWith("artist-for:")) openArtist(TrackArtist(d.title)) else if (d.key.startsWith("spotify:")) openCard(SpotifyCard(d.key, d.title, d.subtitle, d.artwork, d.key.split(':')[1])) } }
-    fun play(track: Track, queue: List<Track>) {
+    fun play(track: Track, queue: List<Track>, context: String? = null) {
         playJob?.cancel()
+        _playContext.value = context
         _opening.value = track
         val list = queue.ifEmpty { listOf(track) }
         val index = list.indexOfFirst { it.isrc == track.isrc }.coerceAtLeast(0)
@@ -366,14 +419,14 @@ class SpotViewModel @Inject constructor(
             }
         }
     }
-    fun playCollection(tracks: List<Track>) {
+    fun playCollection(tracks: List<Track>, context: String? = null) {
         if (tracks.isEmpty()) return
         val current = when (val state = player.playbackState.value) {
             is PlaybackState.Playing -> state.track.isrc
             is PlaybackState.Paused -> state.track.isrc
             else -> null
         }
-        play(tracks[collectionStartIndex(tracks, player.shuffleEnabled.value, current)], tracks)
+        play(tracks[collectionStartIndex(tracks, player.shuffleEnabled.value, current)], tracks, context)
     }
     fun favorite(track: Track) = viewModelScope.launch {
         val adding = favorites.value.none { it.isrc == track.isrc }
@@ -415,5 +468,37 @@ class SpotViewModel @Inject constructor(
         }
     }
     fun isImported(uri: String) = uri in imported
+    /** Swaps an explicit song for its clean version wherever it is: this playlist or Liked Songs, and the queue. */
+    fun replaceWithClean(song: Track, collectionKey: String?) = viewModelScope.launch {
+        val clean = try { findClean(song) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        if (clean == null) { _messages.emit("No clean version of ${song.title} was found."); return@launch }
+        trackDao.upsert(clean.toEntity())
+        fun List<Track>.swapped() = map { if (it.isrc == song.isrc) clean else it }.distinctBy { it.isrc }
+        val playlistId = collectionKey?.toLongOrNull()
+        if (playlistId != null) library.replaceTracks(playlistId, playlistTracks.value[playlistId].orEmpty().swapped())
+        if (favorites.value.any { it.isrc == song.isrc }) {
+            val order = favorites.value.swapped()
+            library.toggleFavorite(song); library.addFavorite(clean, System.currentTimeMillis()); library.setFavoriteOrder(order)
+        }
+        val queue = player.queue.value
+        val at = queue.tracks.indexOfFirst { it.isrc == song.isrc }
+        if (at >= 0) {
+            if (at == queue.currentIndex) play(clean, queue.tracks.map { if (it.isrc == song.isrc) clean else it }, _playContext.value)
+            else { player.removeFromQueue(at); player.addToQueue(clean, playNext = at == queue.currentIndex + 1) }
+        }
+        _messages.emit("Replaced with the clean version")
+    }
+    private suspend fun findClean(song: Track): Track? {
+        fun norm(value: String) = value.lowercase().replace(Regex("\\(.*?\\)|\\[.*?]|- .*clean.*"), " ").replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+        val title = norm(song.title)
+        val artist = norm(song.artist.substringBefore(','))
+        catalog.searchAll("${song.title} ${song.artist.substringBefore(',')}").tracks.firstOrNull {
+            it.isExplicit == false && it.isrc != song.isrc && norm(it.title) == title && norm(it.artist).contains(artist)
+        }?.let { return it }
+        // Spotify has no clean release of some songs. A clean upload on YouTube is the fallback.
+        return youtube.searchBroad("${song.artist.substringBefore(',')} ${song.title} clean").firstOrNull { video ->
+            isValidYoutubeVideoId(video.videoId) && video.title.contains("clean", true) && norm(video.title).contains(title)
+        }?.let { Track("youtube:${it.videoId}", title = "${song.title} (Clean)", artist = song.artist, album = song.album, durationMs = it.durationMs, albumArtUrl = song.albumArtUrl, source = TrackSource.YOUTUBE, youtubeVideoId = it.videoId, isExplicit = false, artists = song.artists) }
+    }
     fun download(track: Track) { downloads.download(listOf(track)); _messages.tryEmit("Downloading ${track.title}") }
 }

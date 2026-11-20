@@ -1123,7 +1123,8 @@ class Media3MusicPlayer @Inject constructor(
 
         const val BUFFER_FOR_PLAYBACK_MS = 500
 
-        const val CACHE_MAX_BYTES = 200L * 1024 * 1024
+        // Room for a few hundred songs, so songs played before replay from the device.
+        const val CACHE_MAX_BYTES = 512L * 1024 * 1024
 
         const val WARM_BYTES = 256L * 1024
 

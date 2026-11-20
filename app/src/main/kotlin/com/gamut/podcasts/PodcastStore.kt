@@ -26,6 +26,9 @@ class PodcastStore @Inject constructor(@ApplicationContext context: Context) {
         _shows.value = next
     }
     fun position(id: String) = prefs.getLong("position:$id", 0L).coerceAtLeast(0L)
+    /** The newest episode the listener has seen for a show. A newer one shows a blue dot. */
+    fun seenEpisode(feedUrl: String): String? = prefs.getString("seen:$feedUrl", null)
+    fun markSeen(feedUrl: String, episodeId: String) { prefs.edit().putString("seen:$feedUrl", episodeId).apply() }
     fun observe(player: MusicPlayer, scope: CoroutineScope) {
         scope.launch {
             var lastId: String? = null

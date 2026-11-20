@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,15 +95,24 @@ internal fun PodcastEpisodeCards(episodes: List<HomeEpisode>, vm: SpotViewModel)
 }
 
 // Music videos play muted inside the card, in the app, instead of opening another site.
+// The card most in view starts on its own, muted. A tap stops it, and a tap on another card plays that one.
 @Composable
-internal fun MusicVideoRail(videos: List<YoutubeCandidate>) {
+internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Music videos for you") {
     if (videos.isEmpty()) return
-    var playing by rememberSaveable { mutableStateOf<String?>(null) }
-    SHeading("Music videos for you")
-    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    var chosen by rememberSaveable { mutableStateOf<String?>(null) }
+    var stopped by remember { mutableStateOf(emptySet<String>()) }
+    val rail = androidx.compose.foundation.lazy.rememberLazyListState()
+    val inView by remember { derivedStateOf {
+        rail.layoutInfo.visibleItemsInfo.firstOrNull { it.offset >= -it.size / 2 }?.index ?: rail.firstVisibleItemIndex
+    } }
+    val playing = chosen ?: videos.getOrNull(inView)?.videoId?.takeIf { it !in stopped }
+    SHeading(title)
+    LazyRow(state = rail, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(videos, key = { it.videoId }) { video ->
             val on = playing == video.videoId
-            Column(Modifier.width(272.dp).clip(RoundedCornerShape(8.dp)).background(Card).clickable(onClickLabel = if (on) "Stop video" else "Play video muted") { playing = if (on) null else video.videoId }) {
+            Column(Modifier.width(272.dp).clip(RoundedCornerShape(8.dp)).background(Card).clickable(onClickLabel = if (on) "Stop video" else "Play video muted") {
+                if (on) { stopped = stopped + video.videoId; chosen = null } else { stopped = stopped - video.videoId; chosen = video.videoId }
+            }) {
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
                     if (on) MutedVideo(video.videoId, Modifier.fillMaxSize())
                     else {
@@ -111,6 +122,48 @@ internal fun MusicVideoRail(videos: List<YoutubeCandidate>) {
                 }
                 Text(video.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp))
                 Text((if (on) "Playing muted · tap to stop · " else "Plays muted in Cadence · ") + video.channelName, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
+            }
+        }
+    }
+}
+
+/** The small blue dot on a show that has an episode the listener hasn't seen yet. */
+@Composable
+internal fun NewDot(modifier: Modifier = Modifier) {
+    Box(modifier.size(10.dp).background(NewBlue, CircleShape).semantics { contentDescription = "New episode" })
+}
+internal val NewBlue = Color(0xFF3D91F4)
+
+@Composable
+internal fun NewEpisodeRail(episodes: List<HomeEpisode>, fresh: Set<String>, vm: SpotViewModel) {
+    if (episodes.isEmpty()) return
+    SHeading("New episodes")
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        items(episodes, key = { "new-" + it.show.feedUrl }) { item ->
+            val song = item.episode.track(item.show)
+            Column(Modifier.width(152.dp).clickable { vm.play(song, listOf(song)) }) {
+                SArt(spotifyThumb(song.albumArtUrl), Modifier.size(152.dp))
+                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (item.show.feedUrl in fresh) NewDot(Modifier.padding(end = 6.dp))
+                    Text(song.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Text(item.show.title, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp).clickable { vm.openShow(item.show) })
+            }
+        }
+    }
+}
+
+/** Tall colored cards that open a genre or mood page. */
+@Composable
+internal fun CategoryRail(title: String, categories: List<BrowseCategory>, artwork: List<String>, open: (BrowseCategory) -> Unit) {
+    if (categories.isEmpty()) return
+    SHeading(title)
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(categories, key = { it.name }) { category ->
+            val index = categories.indexOf(category)
+            Box(Modifier.width(140.dp).height(190.dp).clip(RoundedCornerShape(8.dp)).background(Brush.verticalGradient(listOf(Color(category.color), Color(category.color).copy(alpha = .55f)))).clickable { open(category) }) {
+                artwork.getOrNull(index % artwork.size.coerceAtLeast(1))?.let { SArt(spotifyThumb(it), Modifier.size(104.dp).align(Alignment.Center).graphicsLayer { rotationZ = if (index % 2 == 0) -8f else 8f }) }
+                Text("#" + category.title.lowercase(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(12.dp))
             }
         }
     }

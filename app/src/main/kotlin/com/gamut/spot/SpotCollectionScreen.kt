@@ -34,6 +34,11 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
     var filter by remember { mutableStateOf("") }
     var showFilter by remember { mutableStateOf(false) }
     val shuffle by vm.player.shuffleEnabled.collectAsState()
+    val playback by vm.player.playbackState.collectAsState()
+    val playContext by vm.playContext.collectAsState()
+    // The big button shows pause while this collection is the one playing.
+    val playingHere = playContext == detail.key && playing != null && detail.tracks.any { it.isrc == playing }
+    val running = playback is com.gamut.core.model.PlaybackState.Playing
     val save = LocalSaveTrack.current
     val context = LocalContext.current
     val songs = remember(detail.tracks, filter) { detail.tracks.filter { filter.isBlank() || it.title.contains(filter, true) || it.artist.contains(filter, true) } }
@@ -60,7 +65,9 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
                     SIcon(Icons.Outlined.MoreVert, "Collection options", tint = Muted, onClick = { menu = true })
                     Spacer(Modifier.weight(1f))
                     if (detail.podcast == null) SIcon(Icons.Outlined.Shuffle, "Shuffle", tint = if (shuffle) Green else Muted, onClick = { vm.player.setShuffle(!shuffle) })
-                    FilledIconButton(onClick = { vm.playCollection(detail.tracks) }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play collection", Modifier.size(34.dp)) }
+                    FilledIconButton(onClick = { when { playingHere && running -> vm.player.pause(); playingHere -> vm.player.resume(); else -> vm.playCollection(detail.tracks, detail.key) } }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) {
+                        if (playingHere && running) Icon(Icons.Filled.Pause, "Pause collection", Modifier.size(34.dp)) else Icon(Icons.Filled.PlayArrow, "Play collection", Modifier.size(34.dp))
+                    }
                 }
             }
         }
@@ -74,7 +81,7 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
             items(songs, key = { it.isrc }) { song ->
                 val episode = byId[song.isrc]
                 val resume = vm.podcastStore.position(song.isrc)
-                Column(Modifier.fillMaxWidth().clickable { vm.play(song, detail.tracks) }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.fillMaxWidth().clickable { vm.play(song, detail.tracks, detail.key) }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         SArt(song.albumArtUrl, Modifier.size(64.dp))
                         Text(song.title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.titleMedium, color = if (song.isrc == playing) Green else Color.White, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -86,12 +93,12 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
                         SIcon(Icons.Outlined.MoreHoriz, "Episode options", tint = Muted, onClick = { onMore(song) })
                         Spacer(Modifier.weight(1f))
                         Text(if (resume > 0) "Resume · ${timeLabel(resume)}" else "Play", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 8.dp))
-                        FilledIconButton(onClick = { vm.play(song, detail.tracks) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play episode") }
+                        FilledIconButton(onClick = { vm.play(song, detail.tracks, detail.key) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play episode") }
                     }
                 }
                 HorizontalDivider(color = Color.White.copy(alpha = .08f), modifier = Modifier.padding(horizontal = 16.dp))
             }
-        } else itemsIndexed(songs, key = { _, song -> song.isrc }) { index, song -> STrack(song, song.isrc == playing, song.isrc in favorites, number = if (detail.key.startsWith("spotify:artist:")) index + 1 else null, onPlay = { vm.play(song, detail.tracks) }, onMore = { onMore(song) }) }
+        } else itemsIndexed(songs, key = { _, song -> song.isrc }) { index, song -> STrack(song, song.isrc == playing, song.isrc in favorites, number = if (detail.key.startsWith("spotify:artist:")) index + 1 else null, onPlay = { vm.play(song, detail.tracks, detail.key) }, onMore = { onMore(song) }) }
         if (!detail.spotify?.albums.isNullOrEmpty()) item { SCardRail("Albums and singles", detail.spotify!!.albums, vm::openCard) }
         if (!detail.loading && detail.error == null && detail.tracks.isEmpty()) item { Text("No available audio in this collection.", color = Muted, modifier = Modifier.padding(24.dp)) }
     }

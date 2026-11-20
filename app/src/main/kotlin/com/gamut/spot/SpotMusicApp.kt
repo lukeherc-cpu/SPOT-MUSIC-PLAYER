@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -41,7 +43,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-private enum class Page { Home, Search, Library, Create, Settings, Import }
+private enum class Page { Home, Search, Library, Settings, Import }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +61,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     val opening by vm.opening.collectAsState()
     val importing by vm.importing.collectAsState()
     val downloadedTracks by vm.downloadedTracks.collectAsState()
+    val newShows by vm.newShows.collectAsState()
     val shared by sharedLink.collectAsState()
     val loaded = when (val state = playback) { is PlaybackState.Playing -> state.track; is PlaybackState.Paused -> state.track; else -> null }
     val track = opening ?: loaded
@@ -111,11 +114,13 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                     if (track != null) SpotMiniPlayer(track, vm.player, isPlaying, opening != null, track.isrc in favoriteIds,
                         onOpen = { fullPlayer = true }, onSave = { vm.saveToLiked(track); saveTrack = track }, onBounds = { miniBounds = it })
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(62.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic), Triple(Page.Create, "Create", Icons.Outlined.Add))
+                        // Account sits where Create used to be. Create is now the + at the top of each page.
+                        val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic), Triple(Page.Settings, "Account", Icons.Outlined.Person))
                         entries.forEach { (target, title, icon) ->
                             val selected = page == target
                             Column(Modifier.weight(1f).fillMaxHeight().clickable { navigate(target) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                Icon(if (selected && target == Page.Home) Icons.Filled.Home else icon, null, tint = if (selected) Color.White else Muted, modifier = Modifier.size(27.dp))
+                                if (target == Page.Settings) Box(Modifier.size(27.dp).then(if (selected) Modifier.border(1.5.dp, Color.White, CircleShape) else Modifier).padding(if (selected) 2.dp else 0.dp), contentAlignment = Alignment.Center) { SAvatar(null, if (selected) 23.dp else 26.dp) }
+                                else Icon(if (selected && target == Page.Home) Icons.Filled.Home else icon, null, tint = if (selected) Color.White else Muted, modifier = Modifier.size(27.dp))
                                 Text(title, style = MaterialTheme.typography.labelSmall, color = if (selected) Color.White else Muted, modifier = Modifier.padding(top = 4.dp))
                             }
                         }
@@ -131,45 +136,68 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                     Page.Home -> PullToRefreshBox(isRefreshing = pullRequested && home.loading, onRefresh = { pullRequested = true; vm.refreshHome() }, indicator = {}) { LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
                         item {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                SAvatar { navigate(Page.Settings) }
+                                CreateButton { createSheet = true }
                                 LazyRow(Modifier.padding(start = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(listOf("All", "Music", "Podcasts")) { filter -> SChip(filter, homeFilter == filter) { homeFilter = filter } }
                                 }
                             }
                         }
                         item {
-                            val shortcuts = buildList {
-                                if (homeFilter != "Podcasts") {
-                                    add(Triple("Liked Songs", null as String?, { vm.openPlaylist("liked") }))
-                                    playlists.take(3).forEach { p -> add(Triple(p.name, p.coverUri ?: playlistTracks[p.id]?.firstOrNull()?.albumArtUrl, { vm.openPlaylist(p.id.toString()) })) }
-                                }
-                                if (homeFilter != "Music") follows.take(4).forEach { show -> add(Triple(show.title, show.artwork, { vm.openShow(show) })) }
-                            }.take(8)
+                            // Always eight tiles: your collections first, then mixes, recent albums and editorial picks to fill the grid.
+                            val shortcuts = remember(homeFilter, playlists, playlistTracks, follows, home.mixes, home.personal, home.shows, recent, newShows) {
+                                buildList<HomeTile> {
+                                    if (homeFilter != "Podcasts") {
+                                        add(HomeTile("Liked Songs", null, liked = true) { vm.openPlaylist("liked") })
+                                        playlists.take(3).forEach { p -> add(HomeTile(p.name, p.coverUri ?: playlistTracks[p.id]?.firstOrNull()?.albumArtUrl) { vm.openPlaylist(p.id.toString()) }) }
+                                    }
+                                    if (homeFilter != "Music") follows.sortedByDescending { it.feedUrl in newShows }.take(4).forEach { show -> add(HomeTile(show.title, show.artwork, fresh = show.feedUrl in newShows) { vm.openShow(show) }) }
+                                    if (homeFilter != "Podcasts") {
+                                        (home.mixes.take(2) + home.personal.take(2)).forEach { mix -> add(HomeTile(mix.title, mix.artwork) { vm.openMix(mix) }) }
+                                        recent.filter { it.source != TrackSource.PODCAST && !it.album.isNullOrBlank() }.distinctBy { it.album }.take(4).forEach { song -> add(HomeTile(song.album!!, song.albumArtUrl) { vm.openAlbum(song) }) }
+                                        listOf(SpotDiscovery.NEW_MUSIC_FRIDAY, SpotDiscovery.TODAYS_TOP_HITS, SpotDiscovery.US_TOP_50, SpotDiscovery.RAP_CAVIAR, SpotDiscovery.PEACEFUL_PIANO, SpotDiscovery.GLOBAL_TOP_50).forEach { card -> add(HomeTile(card.title, card.artwork) { vm.openCard(card) }) }
+                                    }
+                                    if (homeFilter == "Podcasts") {
+                                        home.shows.take(8).forEach { show -> add(HomeTile(show.title, show.artwork) { vm.openShow(show) }) }
+                                        BrowseCategory.entries.filter { it.group == BrowseGroup.Podcasts }.forEach { category -> add(HomeTile(category.title, null, color = category.color) { vm.openBrowse(category) }) }
+                                    }
+                                }.distinctBy { it.title.lowercase() }.take(8)
+                            }
                             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 shortcuts.chunked(2).forEach { pair -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    pair.forEach { (title, art, open) -> Row(Modifier.weight(1f).height(60.dp).clip(RoundedCornerShape(4.dp)).background(Card).clickable(onClick = open), verticalAlignment = Alignment.CenterVertically) {
-                                        SArt(art, Modifier.size(60.dp), liked = title == "Liked Songs")
-                                        Text(title, Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    pair.forEach { tile -> Row(Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(4.dp)).background(Card).clickable(onClick = tile.open), verticalAlignment = Alignment.CenterVertically) {
+                                        if (tile.color != null) Box(Modifier.size(56.dp).background(Color(tile.color)), contentAlignment = Alignment.Center) { Icon(Icons.Filled.Podcasts, null, tint = Color.White) }
+                                        else SArt(spotifyThumb(tile.art), Modifier.size(56.dp), liked = tile.liked)
+                                        Text(tile.title, Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (tile.fresh) NewDot(Modifier.padding(end = 10.dp))
                                     } }
                                     if (pair.size == 1) Spacer(Modifier.weight(1f))
                                 } }
                             }
                         }
-                        if (homeFilter != "Podcasts") item { DailyMixRail(home.mixes, home.loading, vm::openMix) }
-                        if (homeFilter != "Music") {
-                            if (follows.isNotEmpty()) item { PodcastRail("Your shows", follows.take(12), vm::openShow) }
-                            if (home.podcastsLoading) item { RailSkeleton() }
-                            else if (home.shows.isNotEmpty()) item {
-                                PodcastRail("Find your next podcast", home.shows, vm::openShow)
-                                if (home.podcastReason.isNotBlank()) Text(home.podcastReason, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                            }
-                        }
-                        if (homeFilter != "Podcasts" && !home.loading) {
-                            home.rails.forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
+                        if (homeFilter != "Podcasts") {
+                            item { DailyMixRail(home.mixes, home.loading, vm::openMix) }
+                            if (home.personal.isNotEmpty()) item { DailyMixRail(home.personal, false, vm::openMix, title = "Made for you") }
                             home.rails.flatMap { it.cards }.firstOrNull { it.type == "album" }?.let { card -> item { FeaturedRelease(card) { vm.openCard(card) } } }
+                        }
+                        if (homeFilter != "Music") {
+                            if (follows.isNotEmpty()) item { PodcastRail("Your shows", follows.sortedByDescending { it.feedUrl in newShows }.take(12), newShows, vm::openShow) }
+                            item { NewEpisodeRail(home.newEpisodes, newShows, vm) }
+                        }
+                        if (homeFilter == "All") item { if (home.podcastsLoading) DiscoverySkeleton() else PodcastEpisodeCards(home.episodes.take(1), vm) }
+                        if (homeFilter != "Podcasts" && !home.loading) {
+                            home.rails.take(1).forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
+                            item { CategoryRail("Explore your genres", BrowseCategory.entries.filter { it.genre != null }.shuffled(kotlin.random.Random(home.mixes.firstOrNull()?.id.hashCode() + recent.size)).take(6), home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct(), vm::openBrowse) }
+                            home.rails.drop(1).forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title.replace("More like", "Popular with listeners of"), rail.cards, vm::openCard) } }
                             item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos) }
                         }
-                        if (homeFilter != "Music") item { if (home.podcastsLoading) DiscoverySkeleton() else PodcastEpisodeCards(home.episodes, vm) }
+                        if (homeFilter != "Music") {
+                            if (home.podcastsLoading) item { RailSkeleton() }
+                            else if (home.shows.isNotEmpty()) item {
+                                PodcastRail("Find your next podcast", home.shows, emptySet(), vm::openShow)
+                                if (home.podcastReason.isNotBlank()) Text(home.podcastReason, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                            }
+                            if (homeFilter == "Podcasts") item { if (home.podcastsLoading) DiscoverySkeleton() else PodcastEpisodeCards(home.episodes, vm) }
+                        }
                         if (recent.isNotEmpty()) {
                             item { SHeading("Recently played") }
                             items(recent.take(5), key = { "recent-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { vm.play(song, recent) }, onMore = { actions = song }) }
@@ -178,12 +206,25 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         home.error?.let { error -> item { ErrorRow(error, vm::refreshHome) } }
                     } }
                     Page.Search -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                        PageTitle("Search", { navigate(Page.Settings) })
+                        PageTitle("Search", { createSheet = true })
                         SearchInput(search.query, vm::search)
                         if (search.query.isBlank()) {
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                                // Browse page: shortcuts, things to watch and hear, then genres, podcast topics and moods. No audiobooks.
+                                val art = home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct()
+                                fun group(value: BrowseGroup) = BrowseCategory.entries.filter { it.group == value }
                                 item { SHeading("Browse all") }
-                                item { CategoryGrid(artwork = home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct(), podcastArtwork = home.shows.firstOrNull()?.artwork, onCategory = vm::openBrowse) }
+                                item { CategoryGrid(group(BrowseGroup.Top), artwork = art, podcastArtwork = home.shows.firstOrNull()?.artwork, onCategory = vm::openBrowse, compact = true) }
+                                item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, "Videos you can watch") }
+                                if (home.newEpisodes.isNotEmpty()) item { NewEpisodeRail(home.newEpisodes, newShows, vm) }
+                                else if (home.episodes.isNotEmpty()) item { NewEpisodeRail(home.episodes, emptySet(), vm) }
+                                item { CategoryRail("More for you", group(BrowseGroup.More) + BrowseCategory.NewReleases + BrowseCategory.Charts, art.drop(3), vm::openBrowse) }
+                                item { SHeading("Genres") }
+                                item { CategoryGrid(BrowseCategory.entries.filter { it.genre != null }, artwork = art.drop(1), podcastArtwork = null, onCategory = vm::openBrowse) }
+                                item { SHeading("Podcasts") }
+                                item { CategoryGrid(group(BrowseGroup.Podcasts), artwork = home.shows.mapNotNull { it.artwork }, podcastArtwork = null, onCategory = vm::openBrowse) }
+                                item { SHeading("Moods & activities") }
+                                item { CategoryGrid(group(BrowseGroup.Moods), artwork = art.drop(2), podcastArtwork = null, onCategory = vm::openBrowse) }
                                 home.rails.take(2).forEach { rail -> item { SCardRail(rail.title, rail.cards, vm::openCard) } }
                             }
                         } else {
@@ -222,9 +263,8 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         }
                     }
                     Page.Library -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                        PageTitle("Your Library", { navigate(Page.Settings) }, trailing = {
+                        PageTitle("Your Library", { createSheet = true }, trailing = {
                             SIcon(Icons.Outlined.Search, "Search", onClick = { navigate(Page.Search) })
-                            SIcon(Icons.Outlined.Add, "Create or import", onClick = { createSheet = true })
                         })
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(listOf("All", "Playlists", "Podcasts", "Downloads")) { filter -> SChip(filter, libraryFilter == filter) { libraryFilter = filter } }
@@ -247,7 +287,10 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 } else items(playlists, key = { "library-${it.id}" }) { playlist -> SLibraryRow(playlist.name, "Playlist · ${playlistTracks[playlist.id]?.size ?: 0} songs", playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl) { vm.openPlaylist(playlist.id.toString()) } }
                             }
                             if (libraryFilter in listOf("All", "Podcasts")) {
-                                if (follows.isNotEmpty()) items(follows, key = { "follow-${it.feedUrl}" }) { show -> SLibraryRow(show.title, "Podcast · ${show.author}", show.artwork) { vm.openShow(show) } }
+                                if (follows.isNotEmpty()) items(follows, key = { "follow-${it.feedUrl}" }) { show -> Box {
+                                    SLibraryRow(show.title, if (show.feedUrl in newShows) "New episode · ${show.author}" else "Podcast · ${show.author}", show.artwork) { vm.openShow(show) }
+                                    if (show.feedUrl in newShows) NewDot(Modifier.align(Alignment.CenterEnd).padding(end = 20.dp))
+                                } }
                                 else item { TextButton(onClick = { searchFilter = "Podcasts"; navigate(Page.Search); vm.search("popular podcasts") }, modifier = Modifier.padding(8.dp)) { Text("Find podcasts to follow", color = Color.White) } }
                             }
                             if (libraryFilter == "Downloads") {
@@ -257,11 +300,6 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             }
                             item { TextButton(onClick = { navigate(Page.Import) }, modifier = Modifier.padding(8.dp)) { Icon(Icons.Outlined.Download, null); Spacer(Modifier.width(8.dp)); Text("Import from Spotify", color = Color.White) } }
                         }
-                    }
-                    Page.Create -> Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
-                        Text("Create", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(vertical = 24.dp))
-                        ActionTile(Icons.Outlined.QueueMusic, "Playlist", "Build a collection of your favorites") { createName = "" }
-                        ActionTile(Icons.Outlined.Download, "Import from Spotify", "Bring a playlist or album into your library") { navigate(Page.Import) }
                     }
                     Page.Import -> Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) { SIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = { navigate(Page.Library) }); Text("Import from Spotify", style = MaterialTheme.typography.titleLarge) }
@@ -310,6 +348,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Person, "Go to artist") { artistTrack = song; actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
+                if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Replace with clean version") { vm.replaceWithClean(song, detail?.key); actions = null }
             }
         } }
         addToPlaylist?.let { song -> ModalBottomSheet(onDismissRequest = { addToPlaylist = null }, containerColor = Color(0xFF222222)) {
@@ -324,11 +363,21 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
 }
 
 @Composable
-private fun PageTitle(title: String, profile: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
+private fun PageTitle(title: String, create: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        SAvatar(profile); Text(title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.headlineMedium, maxLines = 1); trailing()
+        CreateButton(create); Text(title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.headlineMedium, maxLines = 1); trailing()
     }
 }
+
+/** Create lives at the top left, where the profile picture used to be: just a +, no label. */
+@Composable
+private fun CreateButton(onClick: () -> Unit) {
+    Box(Modifier.size(34.dp).clip(CircleShape).background(Card).clickable(onClickLabel = "Create or import", onClick = onClick).semantics { contentDescription = "Create or import" }, contentAlignment = Alignment.Center) {
+        Icon(Icons.Filled.Add, null, tint = Color.White, modifier = Modifier.size(24.dp))
+    }
+}
+
+private class HomeTile(val title: String, val art: String?, val liked: Boolean = false, val fresh: Boolean = false, val color: Long? = null, val open: () -> Unit)
 
 @Composable
 internal fun SearchInput(query: String, onChange: (String) -> Unit) {
@@ -339,29 +388,33 @@ internal fun SearchInput(query: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun CategoryGrid(artwork: List<String>, podcastArtwork: String?, onCategory: (BrowseCategory) -> Unit) {
-    val categories = BrowseCategory.entries
+private fun CategoryGrid(categories: List<BrowseCategory>, artwork: List<String>, podcastArtwork: String?, onCategory: (BrowseCategory) -> Unit, compact: Boolean = false) {
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         categories.chunked(2).forEachIndexed { rowIndex, pair -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             pair.forEachIndexed { columnIndex, category ->
                 val name = category.title
-                Box(Modifier.weight(1f).height(98.dp).clip(RoundedCornerShape(5.dp)).background(Color(category.color)).clickable { onCategory(category) }.padding(12.dp)) {
+                Box(Modifier.weight(1f).height(if (compact) 64.dp else 98.dp).clip(RoundedCornerShape(5.dp)).background(Color(category.color)).clickable { onCategory(category) }.padding(12.dp)) {
                 Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(.75f))
                 val image = if (name == "Podcasts") podcastArtwork else artwork.getOrNull((rowIndex * 2 + columnIndex) % artwork.size.coerceAtLeast(1))
-                if (image != null) SArt(image, Modifier.size(68.dp).align(Alignment.BottomEnd).offset(x = 20.dp, y = 20.dp).rotate(22f))
-                else Icon(if (name == "Podcasts") Icons.Filled.Podcasts else Icons.Filled.MusicNote, null, tint = Color.White.copy(alpha = .6f), modifier = Modifier.size(42.dp).align(Alignment.BottomEnd))
+                if (image != null) SArt(spotifyThumb(image), Modifier.size(if (compact) 48.dp else 68.dp).align(Alignment.BottomEnd).offset(x = 20.dp, y = 20.dp).rotate(22f))
+                else Icon(if (category.podcast) Icons.Filled.Podcasts else Icons.Filled.MusicNote, null, tint = Color.White.copy(alpha = .6f), modifier = Modifier.size(if (compact) 30.dp else 42.dp).align(Alignment.BottomEnd))
             } }
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
         } }
     }
 }
 
 @Composable
-private fun PodcastRail(title: String, shows: List<PodcastShow>, open: (PodcastShow) -> Unit) {
+private fun PodcastRail(title: String, shows: List<PodcastShow>, fresh: Set<String>, open: (PodcastShow) -> Unit) {
     if (shows.isEmpty()) return
     SHeading(title)
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         items(shows, key = { it.feedUrl }) { show -> Column(Modifier.width(152.dp).clickable { open(show) }) {
-            SArt(show.artwork, Modifier.size(152.dp)); Text(show.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp)); Text(show.author, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+            SArt(show.artwork, Modifier.size(152.dp))
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (show.feedUrl in fresh) NewDot(Modifier.padding(end = 6.dp))
+                Text(show.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }; Text(show.author, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         } }
     }
 }

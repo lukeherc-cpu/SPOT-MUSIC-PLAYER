@@ -97,7 +97,8 @@ internal fun SpotPlayerScreen(vm: SpotViewModel, track: Track, playing: Boolean,
                 else -> LyricsState.Loading
             }
         }
-        if (showWords && words is LyricsState.Loading) {
+        // Load the words with the song, not on the flip, so they are ready when the cover turns.
+        if (words is LyricsState.Loading) {
             if (!podcast) {
                 val lyricTrack = vm.lyricTrack(track)
                 cleanText = CleanLyrics.required(lyricTrack)
