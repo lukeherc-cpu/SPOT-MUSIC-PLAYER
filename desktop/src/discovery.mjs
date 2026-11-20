@@ -1,4 +1,4 @@
-export const categories=[['Music','#e0148c','discover new music'],['Podcasts','#006450','popular'],['New releases','#e66a20','new music friday'],['Charts','#8d67ab',''],['Indie','#608108','indie','indie'],['Alternative','#bc5900','alternative','alternative'],['Pop','#8d67ab','pop','pop'],['Hip-Hop','#ba5d07','hip hop','hip-hop'],['Ambient','#477d95','ambient','ambient'],['Folk & Acoustic','#b49a6d','folk acoustic','folk']];
+export const categories=[['Music','#e0148c','discover new music'],['Podcasts','#006450','popular'],['New releases','#e66a20','new music friday'],['Charts','#8d67ab',''],['Indie','#608108','indie','indie'],['Alternative','#bc5900','alternative','alternative'],['Pop','#8d67ab','pop','pop'],['Hip-Hop','#ba5d07','hip hop','hip-hop'],['Ambient','#477d95','ambient','ambient'],['Folk & Acoustic','#b49a6d','folk acoustic','folk'],['R&B','#dc148c','r&b','r&b'],['Rock','#e91429','rock','rock'],['Country','#d84000','country','country'],['Latin','#e1118c','latin','latin'],['Electronic','#0d73ec','electronic','electronic'],['Jazz','#8c67ab','jazz','jazz'],['Classical','#7d4b32','classical','classical'],['K-Pop','#e8115b','k-pop','k-pop'],['Metal','#777777','metal','metal'],['Chill','#477d95','chill',''],['Workout','#e8115b','workout',''],['Focus','#503750','focus',''],['Sleep','#1e3264','sleep',''],['Party','#af2896','party',''],['Feel good','#e1118c','feel good',''],['Comedy podcasts','#e91429','comedy','','podcast'],['True crime podcasts','#7d4b32','true crime','','podcast'],['News podcasts','#509bf5','news','','podcast'],['Sports podcasts','#148a08','sports','','podcast'],['Business podcasts','#27856a','business','','podcast'],['Tech podcasts','#8d67ab','technology','','podcast']];
 const card=(id,title,subtitle,artwork=null)=>({uri:`spotify:playlist:${id}`,title,subtitle,artwork,type:'playlist'});
 export const US=card('37i9dQZEVXbLRQDuF5jeBp','Top 50 - USA','Most played in the United States','https://charts-images.scdn.co/assets/locale_en/regional/daily/region_us_default.jpg');
 export const GLOBAL=card('37i9dQZEVXbMDoHDwVN2tF','Top 50 - Global','Most played worldwide','https://charts-images.scdn.co/assets/locale_en/regional/daily/region_global_default.jpg');
@@ -27,16 +27,24 @@ export async function recommendations(catalog,library,rotation=Math.floor(Date.n
     return {id:`daily-mix-${index+1}`,title:`Daily Mix ${index+1}`,subtitle:names.join(', ')+' and more',artwork:tracks.find(x=>x.albumArtUrl)?.albumArtUrl,tracks};
   }).filter(x=>x.tracks.length);
   const picked=shuffle(distinct(results.flatMap(x=>[...x.playlists,...x.albums]),'uri'),entropy).slice(0,12);
-  return {mixes,rails:[{title:'Picked for you',cards:picked},...seeds.slice(0,2).map((seed,i)=>({title:`More like ${seed}`,cards:shuffle([...results[i].albums,...results[i].playlists],entropy+i).slice(0,12)}))].filter(x=>x.cards.length),songs:music.slice(0,10)};
+  // Personal mixes: one per favorite artist, plus mood mixes built around the listener's top artist.
+  const artistMixes=seeds.slice(0,3).map((seed,index)=>{
+    const lower=seed.toLowerCase(),tracks=shuffle(distinct([...music.filter(x=>x.artist.toLowerCase().includes(lower)),...results[index].tracks.filter(x=>x.artist.toLowerCase().includes(lower))]),entropy+10+index).slice(0,40);
+    return {id:`personal-mix-artist-${index}`,title:`${seed} Mix`,subtitle:`${seed} and songs like it`,artwork:tracks.find(x=>x.albumArtUrl)?.albumArtUrl,tracks};
+  }).filter(x=>x.tracks.length>=3);
+  const moods=[['Chill Mix','chill'],['Upbeat Mix','upbeat'],['Late Night Mix','late night']];
+  const moodResults=await Promise.all(moods.map(async([,word],i)=>{try{return (await catalog.search(`${word} ${seeds[i%seeds.length]}`)).tracks||[];}catch{return [];}}));
+  const moodMixes=moods.map(([title],i)=>{const tracks=shuffle(distinct(moodResults[i].filter(x=>x.source!=='PODCAST')),entropy+20+i).slice(0,40);return {id:`personal-mix-mood-${i}`,title,subtitle:`${title.replace(' Mix','')} picks with ${seeds[i%seeds.length]}`,artwork:tracks.find(x=>x.albumArtUrl)?.albumArtUrl,tracks};}).filter(x=>x.tracks.length>=3);
+  return {mixes,personal:[...artistMixes,...moodMixes],rails:[{title:'Picked for you',cards:picked},...seeds.slice(0,2).map((seed,i)=>({title:`More like ${seed}`,cards:shuffle([...results[i].albums,...results[i].playlists],entropy+i).slice(0,12)}))].filter(x=>x.cards.length),songs:music.slice(0,10)};
 }
 export async function browse(catalog,name){
   const category=categories.find(x=>x[0]===name);if(!category)throw Error('Unknown browse category.');
   if(name==='Charts'){const chart=await catalog.collection(US.uri);return{title:name,subtitle:'Top charts in the US and around the world',rails:[{title:'Top charts in the US',cards:[{...US,artwork:chart.artwork||US.artwork}]},{title:'Around the world',cards:[GLOBAL]}],tracks:chart.tracks.slice(0,10)};}
   const year=new Date().getFullYear(), genre=category[3];
-  const primary=await catalog.search(category[2]), releases=await catalog.search(genre?`genre:${genre} year:${year}`:`year:${year}`);
+  const primary=await catalog.search(category[2]), releases=await catalog.search(genre?`genre:${genre} year:${year}`:['Music','New releases'].includes(name)?`year:${year}`:`${category[2]} ${year}`);
   // These editorial playlists are known by id only, so fetch their covers up front instead of on first open.
   const featured=await Promise.all((name==='Music'?[fresh,hits]:name==='New releases'?[fresh]:name==='Pop'?[hits]:name==='Hip-Hop'?[rap]:[]).map(async c=>c.artwork?c:{...c,artwork:await catalog.cover(c.uri).catch(()=>null)}));
-  return {title:name,subtitle:genre?`Explore ${name.toLowerCase()} playlists, albums and songs`:'Discover new music',rails:[{title:'Start here',cards:featured},{title:genre?`${name} playlists`:'Discover something new',cards:primary.playlists},{title:genre?`New in ${name}`:'New albums and singles',cards:releases.albums},{title:'Albums to explore',cards:primary.albums}].filter(x=>x.cards.length),tracks:genre?(await catalog.search(`genre:${genre}`)).tracks:primary.tracks};
+  return {title:name,subtitle:genre?`Explore ${name.toLowerCase()} playlists, albums and songs`:['Music','New releases'].includes(name)?'Discover new music':`Playlists and songs for ${name.toLowerCase()}`,rails:[{title:'Start here',cards:featured},{title:genre?`${name} playlists`:'Discover something new',cards:primary.playlists},{title:genre?`New in ${name}`:'New albums and singles',cards:releases.albums},{title:'Albums to explore',cards:primary.albums}].filter(x=>x.cards.length),tracks:genre?(await catalog.search(`genre:${genre}`)).tracks:primary.tracks};
 }
 export async function albumForTrack(catalog,song){
   const linked=t=>/^spotify:album:[A-Za-z0-9]{22}$/.test(t.albumUri)?t.albumUri:null;

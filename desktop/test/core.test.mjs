@@ -194,3 +194,47 @@ test('smart search puts an exact podcast or artist above songs that share the ti
   const catalog={search:async()=>({tracks:[e,{...c,isrc:'c2'}]})};
   assert.deepEqual((await withCleanVersion(catalog,[e,o])).map(x=>x.isrc),['e','c2','o']);
 });
+test('clean version matching picks Spotify clean releases, then clean YouTube uploads, otherwise offers choices',async()=>{
+  const {core,pickSpotifyClean,pickVideoClean,findClean}=await import('../src/clean.mjs');
+  assert.equal(core('Money Trees (feat. Jay Rock) - Radio Edit'),'money trees');
+  const song={isrc:'spotify:explicit',title:'Money Trees (feat. Jay Rock)',artist:'Kendrick Lamar, Jay Rock',album:'good kid',durationMs:386000,isExplicit:true,source:'SPOTIFY'};
+  const clean={...song,isrc:'spotify:clean',isExplicit:false,durationMs:384000};
+  assert.equal(pickSpotifyClean(song,[{...song,isrc:'other'},clean,{...clean,isrc:'cover',artist:'Someone Else'}]).isrc,'spotify:clean');
+  const video={videoId:'abcdefghijk',title:'Kendrick Lamar - Money Trees (Clean)',channel:'Kendrick Lamar - Topic',durationMs:387000,views:5};
+  assert.equal(pickVideoClean(song,[{...video,videoId:'zzzzzzzzzzz',title:'Kendrick Lamar - Money Trees (Explicit)'},video]).videoId,'abcdefghijk');
+  // A " - " title from YouTube keeps the song's own words, so it still matches.
+  assert.ok(pickVideoClean({...song,title:'Money Trees'},[{...video,title:'Kendrick Lamar - Money Trees - Clean'}]));
+  const viaVideo=await findClean({search:async()=>({tracks:[]})},async()=>[video],song);
+  assert.equal(viaVideo.track.youtubeVideoId,'abcdefghijk');assert.equal(viaVideo.track.source,'YOUTUBE');assert.equal(viaVideo.track.isExplicit,false);
+  const viaSpotify=await findClean({search:async()=>({tracks:[clean]})},async()=>[video],song);
+  assert.equal(viaSpotify.track.isrc,'spotify:clean');assert.equal(viaSpotify.track.youtubeVideoId,'abcdefghijk');
+  const choices=await findClean({search:async()=>({tracks:[]})},async()=>[{...video,title:'Money Trees live'}],song);
+  assert.equal(choices.track,undefined);assert.equal(choices.choices.length,1);
+});
+test('replacing a song swaps it everywhere it is saved, once',async()=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),'spot-replace-'));
+  try{
+    const store=new Store(directory);await store.load();
+    const a={isrc:'spotify:a',title:'A',artist:'X',source:'SPOTIFY',isExplicit:true},b={isrc:'youtube:bbbbbbbbbbb',title:'A (Clean)',artist:'X',source:'YOUTUBE',youtubeVideoId:'bbbbbbbbbbb',isExplicit:false};
+    await store.favorite(a);await store.importCollection({title:'P',tracks:[a,b,{isrc:'spotify:c',title:'C',artist:'Y'}]});
+    const s=await store.replace(a.isrc,b);
+    assert.deepEqual(s.favorites.map(x=>x.isrc),[b.isrc]);assert.deepEqual(s.playlists[0].tracks.map(x=>x.isrc),[b.isrc,'spotify:c']);
+    assert.equal(s.favorites[0].youtubeVideoId,'bbbbbbbbbbb');
+    await store.markSeen('https://feed.example/show.xml');assert.ok(store.snapshot().seen['https://feed.example/show.xml']>0);
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+test('signed-in library falls back to GraphQL and keeps only personal mixes',async()=>{
+  const catalog=new Catalog();
+  await assert.rejects(()=>catalog.libraryPlaylists(),/Sign in/);
+  catalog.setAccount('cookie value');assert.equal(catalog.account,null);
+  catalog.setAccount('AQB-session');assert.equal(catalog.account,'AQB-session');
+  catalog.webApi=async()=>{throw Object.assign(Error('Spotify request failed (403).'),{status:403});};
+  catalog.execute=async operation=>{
+    if(operation==='libraryV3')return{me:{libraryV3:{totalCount:1,items:[{item:{data:{__typename:'Playlist',uri:'spotify:playlist:1111111111111111111111',name:'Road trip',ownerV2:{data:{name:'Me'}}}}}]}}};
+    if(operation==='home')return{home:{sections:[{items:[{uri:'spotify:playlist:37i9dQZF1E39abcdefghijkl',name:'Daily Mix 1'},{uri:'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M',name:"Today's Top Hits"}]}]}};
+    throw Error('unexpected '+operation);
+  };
+  catalog.search=async()=>({tracks:[],playlists:[{uri:'spotify:playlist:37i9dQZEVXcABCDEFGHIJKLM',title:'Discover Weekly',subtitle:'',artwork:null,type:'playlist'}]});
+  assert.deepEqual((await catalog.libraryPlaylists()).map(x=>x.title),['Road trip']);
+  assert.deepEqual((await catalog.personalMixes()).map(x=>x.title),['Daily Mix 1','Discover Weekly']);
+});

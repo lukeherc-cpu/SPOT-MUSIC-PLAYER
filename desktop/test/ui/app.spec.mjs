@@ -27,6 +27,8 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     expect(await page.evaluate(()=>typeof window.require)).toBe('undefined');expect(await page.evaluate(()=>typeof window.process)).toBe('undefined');
     await page.getByRole('button',{name:'Search',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Browse all',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Chill',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'True crime podcasts',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Charts',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Charts',exact:true})).toBeVisible();
     await expect(page.getByRole('textbox',{name:'Search music and podcasts'})).toHaveCount(0);
@@ -61,6 +63,12 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     await expect(page.getByRole('heading',{name:'UI Reference Playlist',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Play collection',exact:true}).click();
     await expect.poll(()=>page.locator('#audio').evaluate(el=>!el.paused&&el.currentTime>0),{timeout:15000}).toBe(true);
+    // The collection's own play button pauses what it started, then resumes it.
+    const big=page.locator('#content .play-big');
+    await expect(big).toHaveAttribute('aria-label','Pause');
+    await big.click();await expect.poll(()=>page.locator('#audio').evaluate(el=>el.paused)).toBe(true);
+    await expect(big).toHaveAttribute('aria-label','Play collection');
+    await big.click();await expect.poll(()=>page.locator('#audio').evaluate(el=>!el.paused)).toBe(true);
     await page.getByRole('button',{name:'Queue',exact:true}).click();
     await expect(page.getByRole('dialog',{name:'Queue'})).toContainText('Now playing');
     await page.getByRole('button',{name:'Close',exact:true}).click();
@@ -83,6 +91,8 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     await page.getByRole('button',{name:'Close player',exact:true}).click();
     await page.getByRole('button',{name:'Import from Spotify',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Bring your music with you',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Log in with Spotify',exact:true})).toBeVisible();
+    await expect(page.getByRole('textbox',{name:'Spotify link'})).toBeVisible();
     await page.getByRole('button',{name:'Home',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Daily Mixes',exact:true})).toBeVisible();
     await page.locator('[data-row-head="mixes"]').click({button:'right'});
