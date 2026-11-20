@@ -104,13 +104,17 @@ private fun PickRow(card: SpotifyCard, picked: Boolean, enabled: Boolean, onPick
 @Composable
 private fun SpotifySignIn(onDismiss: () -> Unit, onSignedIn: (String) -> Unit) {
     val signedIn by rememberUpdatedState(onSignedIn)
+    var progress by remember { mutableStateOf(0) }
+    var failure by remember { mutableStateOf<String?>(null) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Black).statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 SIcon(Icons.Filled.Close, "Cancel sign-in", onClick = onDismiss)
                 Text("Log in with Spotify", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 8.dp))
             }
-            AndroidView(modifier = Modifier.fillMaxSize(), factory = { context ->
+            if (progress in 1..99) LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth(), color = Green)
+            failure?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp)) }
+            AndroidView(modifier = Modifier.fillMaxWidth().weight(1f), factory = { context ->
                 val cookies = CookieManager.getInstance()
                 cookies.setAcceptCookie(true)
                 var handled = false
@@ -124,12 +128,26 @@ private fun SpotifySignIn(onDismiss: () -> Unit, onSignedIn: (String) -> Unit) {
                     signedIn(value)
                 }
                 WebView(context).apply {
+                    // Without explicit size the WebView lays out at zero height inside a dialog and stays blank.
+                    layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                    setBackgroundColor(android.graphics.Color.WHITE)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
+                    // Spotify's sign-in page treats the embedded-browser marker as unsupported, so present as mobile Chrome.
+                    settings.userAgentString = settings.userAgentString.replace("; wv", "").replace(Regex("Version/\\S+ "), "")
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
+                    }
                     cookies.setAcceptThirdPartyCookies(this, true)
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String) { check() }
                         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) { check() }
+                        override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { failure = null }
+                        override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
+                            if (request.isForMainFrame) failure = "Spotify's sign-in page didn't load (${error.description}). Check your connection and try again."
+                        }
                     }
                     loadUrl("https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F")
                 }

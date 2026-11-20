@@ -62,6 +62,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     val importing by vm.importing.collectAsState()
     val downloadedTracks by vm.downloadedTracks.collectAsState()
     val newShows by vm.newShows.collectAsState()
+    val cleanChoices by vm.cleanChoices.collectAsState()
     val shared by sharedLink.collectAsState()
     val loaded = when (val state = playback) { is PlaybackState.Playing -> state.track; is PlaybackState.Paused -> state.track; else -> null }
     val track = opening ?: loaded
@@ -341,6 +342,27 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Person, "Go to artist") { artistTrack = song; actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
                 if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Replace with clean version") { vm.replaceWithClean(song, detail?.key); actions = null }
+            }
+        } }
+        cleanChoices?.let { choice -> ModalBottomSheet(onDismissRequest = vm::dismissCleanChoices, containerColor = Color(0xFF222222)) {
+            LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
+                item { SHeading("Pick a clean version") }
+                item { Text("Cadence couldn't find a clean version of ${choice.song.title} on its own. Pick one from YouTube. Tap the play button to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
+                if (choice.loading) item { DiscoverySkeleton() }
+                else if (choice.videos.isEmpty()) item { Text("No YouTube uploads found. Try the YouTube filter in Search.", color = Muted, modifier = Modifier.padding(16.dp)) }
+                items(choice.videos, key = { "clean-${it.videoId}" }) { video ->
+                    Row(Modifier.fillMaxWidth().clickable { vm.pickCleanVideo(video) }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SArt("https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg", Modifier.width(96.dp).height(54.dp))
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(video.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(listOfNotNull(video.channelName.takeIf { it.isNotBlank() }, video.durationMs.takeIf { it > 0 }?.let(::timeLabel), "Clean".takeIf { CleanMatch.cleanLabel.containsMatchIn(video.title) }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        SIcon(Icons.Filled.PlayArrow, "Preview ${video.title}", onClick = {
+                            val preview = Track("youtube:${video.videoId}", title = video.title, artist = video.channelName, durationMs = video.durationMs, albumArtUrl = "https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId)
+                            vm.play(preview, listOf(preview))
+                        })
+                    }
+                }
             }
         } }
         addToPlaylist?.let { song -> ModalBottomSheet(onDismissRequest = { addToPlaylist = null }, containerColor = Color(0xFF222222)) {

@@ -114,9 +114,10 @@ internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Mus
                 if (on) { stopped = stopped + video.videoId; chosen = null } else { stopped = stopped - video.videoId; chosen = video.videoId }
             }) {
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+                    // The thumbnail stays underneath, so the card never shows an empty black box while the video loads.
+                    SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
                     if (on) MutedVideo(video.videoId, Modifier.fillMaxSize())
                     else {
-                        SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
                         Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, null, tint = Color.Black) }
                     }
                 }
@@ -174,10 +175,11 @@ internal fun CategoryRail(title: String, categories: List<BrowseCategory>, artwo
 private fun MutedVideo(videoId: String, modifier: Modifier) {
     val id = videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(11)
     val origin = "https://www.youtube-nocookie.com"
-    val page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style></head><body><iframe src="$origin/embed/$id?autoplay=1&mute=1&playsinline=1&controls=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>"""
+    val page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}iframe{border:0;width:100%;height:100%}</style></head><body><iframe src="$origin/embed/$id?autoplay=1&mute=1&playsinline=1&controls=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>"""
     androidx.compose.ui.viewinterop.AndroidView(modifier = modifier, factory = { context ->
         android.webkit.WebView(context).apply {
-            setBackgroundColor(android.graphics.Color.BLACK)
+            layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
