@@ -24,12 +24,12 @@ export class Store {
     if(!tracks.length)throw Error('No available songs to import.');
     return this.change(s=>s.playlists.unshift({id:randomUUID(),title:String(collection.title).slice(0,300),artwork:collection.artwork||null,tracks,createdAt:Date.now()}));
   }
-  /** Swaps a song for another (such as its clean version) in Liked Songs, Bookmarked and every playlist. */
-  replace(oldIsrc,raw){
+  /** Adds another version of a song (such as its clean version) right after it in Liked Songs, Bookmarked and every playlist. Both stay. */
+  addVersion(oldIsrc,raw){
     const next=cleanTrack(raw);if(typeof oldIsrc!=='string'||!oldIsrc)throw Error('Invalid song.');
     return this.change(s=>{
-      const swap=list=>{if(!Array.isArray(list))return list;const out=[];for(const t of list){const x=t.isrc===oldIsrc?next:t;if(!out.some(y=>y.isrc===x.isrc))out.push(x);}return out;};
-      s.favorites=swap(s.favorites);s.saves=swap(s.saves);for(const p of s.playlists)p.tracks=swap(p.tracks);
+      const add=list=>{if(!Array.isArray(list)||!list.some(t=>t.isrc===oldIsrc))return list;const rest=list.filter(t=>t.isrc!==next.isrc),at=rest.findIndex(t=>t.isrc===oldIsrc);return [...rest.slice(0,at+1),next,...rest.slice(at+1)];};
+      s.favorites=add(s.favorites);s.saves=add(s.saves);for(const p of s.playlists)p.tracks=add(p.tracks);
     });
   }
   markSeen(feedUrl){if(typeof feedUrl!=='string'||!feedUrl.startsWith('https://'))throw Error('Invalid podcast.');return this.change(s=>{s.seen={...(s.seen||{}),[feedUrl]:Date.now()};const keys=Object.keys(s.seen);if(keys.length>500)delete s.seen[keys[0]];});}

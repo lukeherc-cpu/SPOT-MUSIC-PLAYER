@@ -211,15 +211,15 @@ test('clean version matching picks Spotify clean releases, then clean YouTube up
   const choices=await findClean({search:async()=>({tracks:[]})},async()=>[{...video,title:'Money Trees live'}],song);
   assert.equal(choices.track,undefined);assert.equal(choices.choices.length,1);
 });
-test('replacing a song swaps it everywhere it is saved, once',async()=>{
+test('a clean version is added right after the explicit song everywhere it is saved',async()=>{
   const directory=await mkdtemp(path.join(os.tmpdir(),'spot-replace-'));
   try{
     const store=new Store(directory);await store.load();
     const a={isrc:'spotify:a',title:'A',artist:'X',source:'SPOTIFY',isExplicit:true},b={isrc:'youtube:bbbbbbbbbbb',title:'A (Clean)',artist:'X',source:'YOUTUBE',youtubeVideoId:'bbbbbbbbbbb',isExplicit:false};
     await store.favorite(a);await store.importCollection({title:'P',tracks:[a,b,{isrc:'spotify:c',title:'C',artist:'Y'}]});
-    const s=await store.replace(a.isrc,b);
-    assert.deepEqual(s.favorites.map(x=>x.isrc),[b.isrc]);assert.deepEqual(s.playlists[0].tracks.map(x=>x.isrc),[b.isrc,'spotify:c']);
-    assert.equal(s.favorites[0].youtubeVideoId,'bbbbbbbbbbb');
+    const s=await store.addVersion(a.isrc,b);
+    assert.deepEqual(s.favorites.map(x=>x.isrc),[a.isrc,b.isrc]);assert.deepEqual(s.playlists[0].tracks.map(x=>x.isrc),[a.isrc,b.isrc,'spotify:c']);
+    assert.equal(s.favorites[1].youtubeVideoId,'bbbbbbbbbbb');assert.equal(s.saves.length,0);
     await store.markSeen('https://feed.example/show.xml');assert.ok(store.snapshot().seen['https://feed.example/show.xml']>0);
   }finally{await rm(directory,{recursive:true,force:true});}
 });

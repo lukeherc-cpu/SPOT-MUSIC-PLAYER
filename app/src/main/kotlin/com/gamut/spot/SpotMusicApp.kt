@@ -357,7 +357,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Person, "Go to artist") { artistTrack = song; actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
-                if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Replace with clean version") { vm.replaceWithClean(song, detail?.key); actions = null }
+                if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Make a clean version") { vm.makeCleanVersion(song, detail?.key); actions = null }
             }
         } }
         cleanChoices?.let { choice -> ModalBottomSheet(onDismissRequest = vm::dismissCleanChoices, containerColor = Color(0xFF222222)) {

@@ -113,7 +113,7 @@ async function dispatch(command,value){
     case'spotify-sign-out':catalog.setAccount(null);await rm(accountFile(),{force:true});return{signedIn:false};
     case'spotify-library':if(!catalog.account)return{signedIn:false};return spotifyLibrary();
     case'clean-version':{const track=cleanTrack(value);if(track.source==='PODCAST')throw Error('Choose a song.');return findClean(catalog,q=>resolver.search(q,10),track);}
-    case'replace-track':{if(!value||typeof value!=='object')throw Error('Invalid request.');return store.replace(string(value.old,160),value.track);}
+    case'add-version':{if(!value||typeof value!=='object')throw Error('Invalid request.');return store.addVersion(string(value.old,160),value.track);}
     case'licenses':{const dir=app.isPackaged?path.join(process.resourcesPath,'licenses'):path.resolve(here,'../../docs/licenses');const agpl=app.isPackaged?path.join(dir,'Cadence-AGPL-3.0.txt'):path.resolve(here,'../../LICENSE');return (await readFile(agpl,'utf8'))+'\n\nSPOTAPI\n'+(await readFile(path.join(dir,'SpotAPI-GPL-3.0.txt'),'utf8'));}
     case'browse':{const name=string(value),topic=categories.find(x=>x[0]===name&&x[4]==='podcast');
       if(name==='Podcasts')return{title:'Podcasts',subtitle:'Find your next favorite show',shows:await searchPodcasts('popular')};

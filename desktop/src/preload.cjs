@@ -9,6 +9,6 @@ contextBridge.exposeInMainWorld('spot',Object.freeze({
   create:name=>call('create',name),deletePlaylist:id=>call('delete-playlist',id),append:(id,track)=>call('append',{id,track}),
   version:()=>call('version'),homeSaved:()=>call('home-saved'),newEpisodes:()=>call('new-episodes'),markSeen:feedUrl=>call('mark-seen',feedUrl),
   spotifyAccount:()=>call('spotify-account'),spotifySignIn:()=>call('spotify-sign-in'),spotifySignOut:()=>call('spotify-sign-out'),spotifyLibrary:()=>call('spotify-library'),
-  cleanVersion:track=>call('clean-version',track),replaceTrack:(old,track)=>call('replace-track',{old,track}),
+  cleanVersion:track=>call('clean-version',track),addVersion:(old,track)=>call('add-version',{old,track}),
   subtitlesStart:(track,position=0)=>call('subtitles-start',{track,position}),subtitlesState:()=>call('subtitles-state'),subtitlesPosition:value=>call('subtitles-position',value),subtitlesStop:()=>call('subtitles-stop'),lyrics:track=>call('lyrics',track),
 }));
