@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {Readable} from 'node:stream';
 import {SubtitleEngine} from '../src/subtitles.mjs';
 const platform=process.platform;
-const packaged=platform==='darwin'?path.resolve('dist',(process.env.SPOT_TARGET_ARCH||process.arch)==='arm64'?'mac-arm64':'mac','Spot Music.app/Contents/Resources/speech'):path.resolve('dist',platform==='win32'?'win-unpacked':'linux-unpacked','resources/speech');
+const packaged=platform==='darwin'?path.resolve('dist',(process.env.SPOT_TARGET_ARCH||process.arch)==='arm64'?'mac-arm64':'mac','Cadence.app/Contents/Resources/speech'):path.resolve('dist',platform==='win32'?'win-unpacked':'linux-unpacked','resources/speech');
 const resources=process.env.SPOT_SPEECH_RESOURCES||packaged;
 const directory=await mkdtemp(path.join(os.tmpdir(),'spot-speech-check-'));
 const sample=path.resolve('../build/speech-bootstrap/whisper.cpp-1.9.5/samples/jfk.wav');

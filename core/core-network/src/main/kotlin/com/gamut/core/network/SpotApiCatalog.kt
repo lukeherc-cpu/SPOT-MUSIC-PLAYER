@@ -159,7 +159,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         return when (operation) {
             "getAlbum" -> "0b6ce3511e1b02e4a40fa95440f992acbe85080eb308af9194322d708fc1914f"
             "queryArtistOverview" -> "eafb1620d783ece118e72fbfede2b0064483e029d3c1aafafa1c2de0e25a89e7"
-            else -> error("Spotify changed its collection API. Try again after updating Spot Music.")
+            else -> error("Spotify changed its collection API. Try again after updating Cadence.")
         }
     }
 
@@ -247,7 +247,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
             }
         }
     }
-    private fun changed(): Nothing = throw CatalogException(502, "Spotify's catalog response has changed. Check for a Spot Music update.")
+    private fun changed(): Nothing = throw CatalogException(502, "Spotify's catalog response has changed. Check for a Cadence update.")
 
     companion object {
         internal fun parseTracks(body: JsonObject): List<Track> {

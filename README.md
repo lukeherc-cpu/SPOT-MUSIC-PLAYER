@@ -1,4 +1,4 @@
-# Spot Music
+# Cadence
 
 Android music and podcast player built on Gamut's playback engine, with a new Spotify-style interface and native Kotlin integration of [Aran404/SpotAPI](https://github.com/Aran404/SpotAPI).
 
@@ -32,4 +32,4 @@ bash ./gradlew :app:assembleRelease -Pgamut.abis=arm64-v8a
 
 Based on [Gamut by serptail](https://github.com/serptail/gamut), licensed under [AGPL-3.0](LICENSE). SpotAPI's adapted protocol code retains its GPL-3.0 notices and [license](docs/licenses/SpotAPI-GPL-3.0.txt). Both license texts are bundled in the app and available in Settings. Original project documentation is preserved in [the upstream README](docs/UPSTREAM_README.md).
 
-Spot Music is an independent project and is not affiliated with Spotify.
+Cadence is an independent project and is not affiliated with Spotify.

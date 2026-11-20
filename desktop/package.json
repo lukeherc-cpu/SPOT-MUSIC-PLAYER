@@ -1,9 +1,9 @@
 {
   "name": "spot-music-desktop",
-  "productName": "Spot Music",
+  "productName": "Cadence",
   "version": "0.2.0-alpha.1",
   "description": "Music discovery and podcast player with Spotify catalog integration",
-  "author": "Spot Music contributors",
+  "author": "Cadence contributors",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "src/main.mjs",
@@ -45,7 +45,7 @@
       },
       {
         "from": "../LICENSE",
-        "to": "licenses/Spot-Music-AGPL-3.0.txt"
+        "to": "licenses/Cadence-AGPL-3.0.txt"
       },
       {
         "from": "THIRD_PARTY.md",
@@ -59,7 +59,7 @@
     "directories": {
       "output": "dist"
     },
-    "artifactName": "Spot-Music-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Cadence-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [
         "nsis"
@@ -87,7 +87,7 @@
       ],
       "category": "AudioVideo",
       "icon": "resources/icon.png",
-      "maintainer": "Spot Music contributors",
+      "maintainer": "Cadence contributors",
       "syncDesktopName": true
     }
   },

@@ -25,7 +25,7 @@
         </intent>
         <package android:name="com.instagram.android" />
     </queries>
-    <application android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:name=".GamutApplication" android:label="Spot Music" android:theme="@style/Theme.Gamut" android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic" android:enableOnBackInvokedCallback="true">
+    <application android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:name=".GamutApplication" android:label="Cadence" android:theme="@style/Theme.Gamut" android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic" android:enableOnBackInvokedCallback="true">
         <activity android:name=".MainActivity" android:exported="true" android:theme="@style/Theme.Gamut.Splash"
             android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection">

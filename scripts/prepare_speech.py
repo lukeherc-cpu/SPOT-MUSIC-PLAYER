@@ -43,7 +43,7 @@ def download(name, url, expected):
     temporary = target.with_suffix(target.suffix + '.part')
     for attempt in range(3):
         try:
-            request = urllib.request.Request(url, headers={'User-Agent': 'Spot-Music-offline-speech-build'})
+            request = urllib.request.Request(url, headers={'User-Agent': 'Cadence-offline-speech-build'})
             with urllib.request.urlopen(request, timeout=180) as response, temporary.open('wb') as output:
                 shutil.copyfileobj(response, output)
             if sha(temporary) != expected:

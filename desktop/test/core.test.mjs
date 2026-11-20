@@ -182,3 +182,15 @@ test('lyrics use the primary artist, skip the album name and fall back to a rank
   await assert.rejects(lyrics(track,async()=>{throw Error('getaddrinfo ENOTFOUND');}));
   assert.equal(pickLyrics([{trackName:'Other',artistName:'Mumford & Sons',duration:245,plainLyrics:'x'}],track),null);
 });
+
+test('smart search puts an exact podcast or artist above songs that share the title, and pairs clean versions',async()=>{
+  const {topResult,pairVersions,withCleanVersion}=await import('../src/search.mjs');
+  const songs=['A','B','C'].map(x=>({isrc:x,title:'The Journal',artist:x}));
+  assert.equal(topResult('the journal',{tracks:songs,shows:[{title:'The Journal.',author:'The Wall Street Journal',feedUrl:'https://x'}]}).kind,'podcast');
+  assert.equal(topResult('daft punk',{tracks:[{isrc:'s',title:'Something',artist:'Daft Punk'}],artists:[{title:'Daft Punk',uri:'spotify:artist:x'}]}).kind,'artist');
+  assert.equal(topResult('little lion man',{tracks:[{isrc:'e',title:'Little Lion Man',artist:'Mumford & Sons'}],shows:[{title:'Lion Talk',feedUrl:'https://y'}]}).kind,'song');
+  const e={isrc:'e',title:'Little Lion Man',artist:'Mumford & Sons',isExplicit:true},c={isrc:'c',title:'Little Lion Man',artist:'Mumford & Sons',isExplicit:false},o={isrc:'o',title:'Other',artist:'X'};
+  assert.deepEqual(pairVersions([e,o,c]).map(x=>x.isrc),['e','c','o']);
+  const catalog={search:async()=>({tracks:[e,{...c,isrc:'c2'}]})};
+  assert.deepEqual((await withCleanVersion(catalog,[e,o])).map(x=>x.isrc),['e','c2','o']);
+});

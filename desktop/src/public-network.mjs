@@ -22,7 +22,7 @@ export async function publicRequest(raw,{range,headers={},family,redirects=5,sig
   const addresses=await lookup(u.hostname,{all:true,...(family?{family}:{})});
   if(!addresses.length||addresses.some(x=>!publicAddress(x.address)))throw Error('Publisher address is not public.');
   const response=await new Promise((resolve,reject)=> {
-    const request=https.get(u,{signal,headers:{'User-Agent':'SpotMusic/0.2 PodcastPlayer',...headers,...(range?{Range:range}:{})},lookup:(_host,options,callback)=> {
+    const request=https.get(u,{signal,headers:{'User-Agent':'Cadence/0.3 PodcastPlayer',...headers,...(range?{Range:range}:{})},lookup:(_host,options,callback)=> {
       if(options.all)callback(null,addresses);else callback(null,addresses[0].address,addresses[0].family);
     }},resolve);
     request.setTimeout(35000,()=>request.destroy(Error('Publisher timed out.'))); request.on('error',reject);

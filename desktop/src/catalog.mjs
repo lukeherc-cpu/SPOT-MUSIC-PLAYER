@@ -3,6 +3,7 @@
  * Mirrors core/core-network/SpotApiCatalog.kt. See ../THIRD_PARTY.md.
  */
 import { createHmac, randomUUID } from 'node:crypto';
+import { topKind } from './search.mjs';
 
 const object = x => x && typeof x === 'object' && !Array.isArray(x) ? x : {};
 const array = x => Array.isArray(x) ? x : [];
@@ -65,12 +66,12 @@ export class Catalog {
   async authorize() {
     const html=await this.request('https://open.spotify.com/');
     const encoded=html.match(/<script\b[^>]*\bid=["']appServerConfig["'][^>]*>([^<]+)<\/script>/)?.[1];
-    if(!encoded) throw Error('Spotify catalog has changed. Update Spot Music.');
+    if(!encoded) throw Error('Spotify catalog has changed. Update Cadence.');
     const config=JSON.parse(Buffer.from(encoded,'base64').toString());
     const links=[...html.matchAll(/["'](https:\/\/open\.spotifycdn\.com\/cdn\/build\/web-player\/[^"']+\.js)["']/g)].map(m=>m[1]);
     const main=await this.request(links.find(x=>x.includes('/web-player.')) || '');
     const candidates=[...main.matchAll(/secret\s*:\s*(["'])(.*?)\1\s*,?\s*version\s*:\s*(\d+)/gs)];
-    if(!candidates.length) throw Error('Spotify session format changed. Update Spot Music.');
+    if(!candidates.length) throw Error('Spotify session format changed. Update Cadence.');
     const secret=candidates.sort((a,b)=>Number(b[3])-Number(a[3]))[0];
     const key=Buffer.from([...secret[2]].map((c,i)=>(c.charCodeAt(0)^(i%33+9)).toString()).join(''));
     const counter=Buffer.alloc(8); counter.writeBigUInt64BE(BigInt(Math.floor(Date.now()/30000)));
@@ -93,7 +94,7 @@ export class Catalog {
     }
     const fallback={searchDesktop:'db61238974d27839a136c9dc02bfdbe3fab7635f21cf85976ebff9a1ee281345',getAlbum:'0b6ce3511e1b02e4a40fa95440f992acbe85080eb308af9194322d708fc1914f',queryArtistOverview:'eafb1620d783ece118e72fbfede2b0064483e029d3c1aafafa1c2de0e25a89e7'};
     if(fallback[operation]) return fallback[operation];
-    throw Error('Spotify collection format changed. Update Spot Music.');
+    throw Error('Spotify collection format changed. Update Cadence.');
   }
   execute(operation,variables) {
     const run=async()=> {
@@ -116,10 +117,17 @@ export class Catalog {
     const promise=(async()=> {
       const data=await this.execute('searchDesktop',{searchTerm:q,offset:0,limit:25,numberOfTopResults:5,includeAudiobooks:false,includeArtistHasConcertsField:false,includePreReleases:false,includeAlbumPreReleases:false,includeAuthors:false,includeEpisodeContentRatingsV2:false,isPrefix:null,sectionFilters:['GENERIC']});
       const root=data.searchV2||data.search; if(!root) throw Error('Spotify returned an incomplete search.');
-      const result={tracks:unique(array((root.tracksV2||root.tracks)?.items).map(x=>decodeTrack(x)).filter(Boolean)),albums:cards(root,'albums','album'),artists:cards(root,'artists','artist'),playlists:cards(root,'playlists','playlist'),podcasts:cards(root,'podcasts','show')};
+      const result={tracks:unique(array((root.tracksV2||root.tracks)?.items).map(x=>decodeTrack(x)).filter(Boolean)),albums:cards(root,'albums','album'),artists:cards(root,'artists','artist'),playlists:cards(root,'playlists','playlist'),podcasts:cards(root,'podcasts','show'),top:array((root.topResultsV2||root.topResults)?.itemsV2).map(x=>x?.item?.data||x?.itemV2?.data||x?.data).filter(Boolean).map(d=>({kind:topKind(d.__typename),title:d.name||d.profile?.name||'',uri:text(d.uri)})).filter(x=>x.kind&&x.title).slice(0,5)};
       if(this.cache.size>=100) this.cache.delete(this.cache.keys().next().value); this.cache.set(q,{at:Date.now(),result}); return result;
     })();
     this.inflight.set(q,promise); try{return await promise;}finally{this.inflight.delete(q);}
+  }
+  // Only the cover of a playlist, for cards that are known by id but have no artwork yet.
+  async cover(raw) {
+    const uri=resource(raw), hit=this.cache.get('cover:'+uri); if(hit) return hit.result;
+    const data=await this.execute('fetchPlaylistMetadata',{uri,locale:'',offset:0,limit:1,enableWatchFeedEntrypoint:false});
+    const root=Object.values(data).find(x=>x?.uri===uri)||Object.values(data).find(x=>x&&typeof x==='object');
+    const result=artwork(root); if(result) this.cache.set('cover:'+uri,{at:Date.now(),result}); return result;
   }
   async collection(raw) {
     const uri=resource(raw), type=uri.split(':')[1];

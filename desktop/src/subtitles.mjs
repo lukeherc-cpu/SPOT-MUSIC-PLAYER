@@ -7,6 +7,7 @@ import path from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {readPublic,secureUrl,publicRequest} from './public-network.mjs';
 import {episodes} from './podcasts.mjs';
+import {fold,plainTitle} from './search.mjs';
 
 const run=promisify(execFile),WINDOW=20000;
 // Native static decoders can crash in host DNS/TLS libraries. Node owns validated
@@ -117,8 +118,6 @@ export class SubtitleEngine{
 const profanity=/(?<![\p{L}\p{N}])(?:motherfuck(?:er|ers|ing)?|fuck(?:s|ed|er|ers|in|ing)?|bullshit|horseshit|shit(?:s|ty|ting|head)?|bitch(?:es|y|ing)?|ass(?:es|hole|holes)?|bastard(?:s)?|cunt(?:s)?|dick(?:s|head)?|cock(?:s|sucker|suckers)?|puss(?:y|ies)|whore(?:s)?|slut(?:s)?|nigg(?:a|as|er|ers)|fag(?:s|got|gots)?|damn(?:ed)?|goddamn(?:ed)?|piss(?:ed|ing)?|tits?|twat(?:s)?)(?![\p{L}\p{N}])/giu;
 export const cleanVersion=track=>track.isExplicit===false||/\b(clean(?: version| edit)?|censored|non[ -]?explicit|no swearing)\b/i.test(track.title);
 export const cleanLyricText=text=>String(text).replace(profanity,'•••');
-const plainTitle=title=>String(title).replace(/\s*[(\[][^)\]]*(?:clean|explicit|official|lyrics?|remaster(?:ed)?|feat\.?|ft\.?|with )[^)\]]*[)\]]/gi,'').replace(/\s+-\s+(?:clean|remaster(?:ed)?|single version|radio edit).*$/i,'').trim();
-const fold=s=>String(s||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/&/g,'and').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 // Read JSON from LRCLIB. A 404 means "no match" and is not an error.
 async function lrclib(read,pathAndQuery){
   try{return JSON.parse(await read('https://lrclib.net/api/'+pathAndQuery,3e6));}
