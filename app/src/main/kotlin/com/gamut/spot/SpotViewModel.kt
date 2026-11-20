@@ -514,16 +514,22 @@ class SpotViewModel @Inject constructor(
         accountJob?.cancel()
         _account.update { it.copy(loading = true, error = null) }
         accountJob = viewModelScope.launch {
-            try {
-                val name = try { catalog.accountName() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
-                val playlists = catalog.libraryPlaylists()
-                _account.update { it.copy(name = name, playlists = playlists) }
-                val mixes = catalog.personalMixes()
-                _account.update { it.copy(mixes = mixes, loading = false) }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
-                val expired = e.message?.contains("sign", true) == true
-                _account.update { it.copy(loading = false, error = if (expired) "Your Spotify sign-in has expired. Sign in again." else "Couldn't load your Spotify library. Tap Retry.") }
+            // Each part loads on its own, so one failing source never hides the others.
+            val name = async { try { catalog.accountName() } catch (e: CancellationException) { throw e } catch (_: Exception) { null } }
+            val playlists = async { try { Result.success(catalog.libraryPlaylists()) } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) } }
+            val mixes = async { try { Result.success(catalog.personalMixes()) } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) } }
+            val lists = playlists.await(); val made = mixes.await()
+            _account.update { it.copy(name = name.await() ?: it.name, playlists = lists.getOrDefault(emptyList()), mixes = made.getOrDefault(emptyList()), loading = false) }
+            val failure = lists.exceptionOrNull() ?: made.exceptionOrNull()
+            val nothing = lists.getOrDefault(emptyList()).isEmpty() && made.getOrDefault(emptyList()).isEmpty()
+            if (nothing) {
+                val detail = failure?.message.orEmpty()
+                val expired = detail.contains("sign", true) || detail.contains("HTTP 401")
+                _account.update { it.copy(error = when {
+                    expired -> "Your Spotify sign-in has expired. Sign in again."
+                    failure != null -> "Couldn't load your Spotify library. Tap Retry." + detail.substringAfter("(", "").substringBefore(")").takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                    else -> "Spotify didn't return any playlists or mixes for this account. Tap Retry."
+                }) }
             }
         }
     }

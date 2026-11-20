@@ -116,7 +116,7 @@ internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Mus
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
                     // The thumbnail stays underneath, so the card never shows an empty black box while the video loads.
                     SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
-                    if (on) MutedVideo(video.videoId, Modifier.fillMaxSize())
+                    if (on) MutedVideo(video.videoId, Modifier.fillMaxSize(), onTap = { stopped = stopped + video.videoId; chosen = null })
                     else {
                         Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, null, tint = Color.Black) }
                     }
@@ -170,24 +170,45 @@ internal fun CategoryRail(title: String, categories: List<BrowseCategory>, artwo
     }
 }
 
-@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@android.annotation.SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 @Composable
-private fun MutedVideo(videoId: String, modifier: Modifier) {
+private fun MutedVideo(videoId: String, modifier: Modifier, onTap: () -> Unit) {
     val id = videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(11)
     val origin = "https://www.youtube-nocookie.com"
-    val page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}iframe{border:0;width:100%;height:100%}</style></head><body><iframe src="$origin/embed/$id?autoplay=1&mute=1&playsinline=1&controls=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>"""
-    androidx.compose.ui.viewinterop.AndroidView(modifier = modifier, factory = { context ->
-        android.webkit.WebView(context).apply {
-            layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            // Stay in the app: links out of the player (such as the video title) are ignored.
-            webViewClient = object : android.webkit.WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: android.webkit.WebView, request: android.webkit.WebResourceRequest) = request.isForMainFrame
+    // The video stays hidden behind its thumbnail until it is actually playing, so YouTube's poster,
+    // red play button and loading spinner never show. Controls, captions and annotations are off, and
+    // the player is taller than the card: the video fills the card exactly while YouTube's title bar
+    // and logo sit in the cropped-off strips above and below it.
+    var playing by remember(id) { mutableStateOf(false) }
+    val shown by animateFloatAsState(if (playing) 1f else 0f, label = "video")
+    val page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;position:relative}
+#p,iframe{position:absolute;left:0;top:-90px;width:100%;height:calc(100% + 180px);border:0;pointer-events:none}
+</style></head><body><div id="p"></div><script>
+function onYouTubeIframeAPIReady(){new YT.Player('p',{host:'$origin',videoId:'$id',playerVars:{autoplay:1,mute:1,playsinline:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,cc_load_policy:0,rel:0,modestbranding:1,loop:1,playlist:'$id'},
+events:{onReady:function(e){e.target.mute();e.target.playVideo()},onStateChange:function(e){if(e.data==1)Cadence.started();else if(e.data==0||e.data==2)e.target.playVideo()}}})}
+</script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
+    Box(modifier) {
+        androidx.compose.ui.viewinterop.AndroidView(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = shown }, factory = { context ->
+            android.webkit.WebView(context).apply {
+                layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                setBackgroundColor(android.graphics.Color.BLACK)
+                isVerticalScrollBarEnabled = false; isHorizontalScrollBarEnabled = false
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.mediaPlaybackRequiresUserGesture = false
+                addJavascriptInterface(object {
+                    @android.webkit.JavascriptInterface fun started() { post { playing = true } }
+                }, "Cadence")
+                // Stay in the app: links out of the player are ignored.
+                webViewClient = object : android.webkit.WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: android.webkit.WebView, request: android.webkit.WebResourceRequest) = request.isForMainFrame
+                }
+                loadDataWithBaseURL("$origin/", page, "text/html", "utf-8", null)
             }
-            loadDataWithBaseURL("$origin/", page, "text/html", "utf-8", null)
-        }
-    }, onRelease = { it.stopLoading(); it.loadUrl("about:blank"); it.destroy() })
+        }, onRelease = { it.stopLoading(); it.loadUrl("about:blank"); it.destroy() })
+        // Taps land on the card, never on YouTube's player, so its menus and overlays never open.
+        Box(Modifier.matchParentSize().clickable(onClickLabel = "Stop video", onClick = onTap))
+    }
 }
+
