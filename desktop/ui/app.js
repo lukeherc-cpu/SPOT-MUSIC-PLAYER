@@ -279,7 +279,7 @@ async function autoplay(){
   }catch(e){toast(`Queue finished. ${e.message}`);}
   finally{autoplaying=false;}
 }
-function loadLyrics(){if(!state.now||state.now.source==='PODCAST'||state.subtitle)return;const track=state.now;state.subtitle={cues:[],working:true};updateWords();void call('lyrics',track).then(data=>{if(state.now?.isrc===track.isrc){state.subtitle=data;updateWords();}}).catch(()=>{if(state.now?.isrc===track.isrc){state.subtitle={cues:[],working:false,error:'No lyrics available for this recording.'};updateWords();}});}
+function loadLyrics(){if(!state.now||state.now.source==='PODCAST'||state.subtitle)return;const track=state.now;state.subtitle={cues:[],working:true};updateWords();void call('lyrics',track).then(data=>{if(state.now?.isrc===track.isrc){state.subtitle=data;updateWords();}}).catch(()=>{if(state.now?.isrc===track.isrc){state.subtitle={cues:[],working:false,error:'Could not reach the lyrics service. Check your connection and try again.'};updateWords();}});}
 function setLyricScale(delta){prefs.lyricScale=Math.min(1.6,Math.max(.8,Math.round(((prefs.lyricScale||1)+delta)*10)/10));savePrefs();applyTheme();if(state.route.type==='profile')render();}
 async function eachTrack(tracks,fn){for(const t of tracks)state.library=await fn(t);refreshDetail();}
 function copyText(text){try{const area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();if(ok)return true;}catch{}return false;}
