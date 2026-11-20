@@ -145,7 +145,6 @@ internal fun SCardRail(title: String, cards: List<SpotifyCard>, open: (SpotifyCa
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = false, number: Int? = null, artwork: Boolean = true, onPlay: () -> Unit, onMore: () -> Unit) {
-    val artistTap = LocalArtistTap.current
     val save = LocalSaveTrack.current
     val enqueue by rememberUpdatedState(LocalQueueTrack.current)
     val haptics = LocalHapticFeedback.current
@@ -165,7 +164,7 @@ internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = fal
             Text(track.title, style = MaterialTheme.typography.bodyLarge, color = if (playing) Green else Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 if (track.isExplicit == true) ExplicitBadge()
-                Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { artistTap(track) })
+                Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         SaveToggle(saved, if (saved) "Saved in playlists" else "Save song", idleTint = Muted, size = 22.dp, onClick = { save(track) })
