@@ -39,7 +39,7 @@ interface SpotifyCatalog {
 }
 
 data class SpotifyCard(val uri: String, val title: String, val subtitle: String, val artwork: String?, val type: String)
-data class SpotifySearch(val tracks: List<Track> = emptyList(), val albums: List<SpotifyCard> = emptyList(), val artists: List<SpotifyCard> = emptyList(), val playlists: List<SpotifyCard> = emptyList(), val podcasts: List<SpotifyCard> = emptyList())
+data class SpotifySearch(val tracks: List<Track> = emptyList(), val albums: List<SpotifyCard> = emptyList(), val artists: List<SpotifyCard> = emptyList(), val playlists: List<SpotifyCard> = emptyList(), val podcasts: List<SpotifyCard> = emptyList(), val top: List<String> = emptyList())
 data class SpotifyArtistInfo(val monthlyListeners: Long = 0, val followers: Long = 0, val verified: Boolean = false, val header: String? = null, val biography: String = "", val latest: List<SpotifyCard> = emptyList(), val related: List<SpotifyCard> = emptyList())
 data class SpotifyCollection(val uri: String, val title: String, val subtitle: String, val artwork: String?, val description: String, val tracks: List<Track>, val total: Int, val skipped: Int = 0, val albums: List<SpotifyCard> = emptyList(), val artistInfo: SpotifyArtistInfo? = null)
 
@@ -82,7 +82,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         }
         val body = execute("searchDesktop", variables)
         val root = body.o("data").let { it.o("searchV2").ifEmpty { it.o("search") } }
-        val result = SpotifySearch(parseTracks(body), cards(root, "albums", "album"), cards(root, "artists", "artist"), cards(root, "playlists", "playlist"), cards(root, "podcasts", "show"))
+        val result = SpotifySearch(parseTracks(body), cards(root, "albums", "album"), cards(root, "artists", "artist"), cards(root, "playlists", "playlist"), cards(root, "podcasts", "show"), topKinds(root))
         synchronized(cache) { if (cache.size >= 50) cache.remove(cache.keys.first()); cache[q] = nowMillis() to result }
         return result
     }
@@ -276,6 +276,12 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         try { libraryPlaylists().forEach(::keep) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
         return found.values.toList()
     }
+
+    /** Spotify's own top results, as kinds in order: song, artist, album, playlist or podcast. */
+    private fun topKinds(root: JsonObject): List<String> = root.o("topResultsV2").ifEmpty { root.o("topResults") }.a("itemsV2").mapNotNull { value ->
+        val item = value.obj(); val data = item.o("item").o("data").ifEmpty { item.o("itemV2").o("data") }.ifEmpty { item.o("data") }
+        when (data.s("__typename")) { "Track" -> "song"; "Artist" -> "artist"; "Album" -> "album"; "Playlist" -> "playlist"; "Podcast" -> "podcast"; else -> null }
+    }.take(5)
 
     private fun discoverHashes(source: String) {
         Regex("""["']([A-Za-z][A-Za-z0-9_]+)["']\s*,\s*["'](?:query|mutation)["']\s*,\s*["']([a-f0-9]{64})["']""").findAll(source).forEach { hashes[it.groupValues[1]] = it.groupValues[2] }

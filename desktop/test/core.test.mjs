@@ -238,3 +238,15 @@ test('signed-in library falls back to GraphQL and keeps only personal mixes',asy
   assert.deepEqual((await catalog.libraryPlaylists()).map(x=>x.title),['Road trip']);
   assert.deepEqual((await catalog.personalMixes()).map(x=>x.title),['Daily Mix 1','Discover Weekly']);
 });
+test('search leads with a matching podcast for show names and with playlists for moods and eras',async()=>{
+  const {topResult,isMood}=await import('../src/search.mjs');
+  for(const q of ['chill','2000s','90s hits','workout','late night','Lo-Fi'])assert.ok(isMood(q),q);
+  for(const q of ['the journal','blinding lights','drake'])assert.equal(isMood(q),false,q);
+  const song=(title,artist='Someone')=>({isrc:`spotify:${title}${artist}`,title,artist});
+  const card=(title,type)=>({uri:`spotify:${type}:x${title}`,title,subtitle:type,type});
+  assert.equal(topResult('the journal',{tracks:[song('The Journal'),song('The Journal','B'),song('The Journal','C')],shows:[{title:'The Journal.',feedUrl:'https://f.example/a'}],playlists:[card('Journal','playlist')],top:[{kind:'podcast'}]}).kind,'podcast');
+  assert.equal(topResult('chill',{tracks:[song('Chill')],playlists:[card('Chill Vibes','playlist')],top:[{kind:'song'}]}).kind,'playlist');
+  assert.equal(topResult('2000s',{tracks:[song('2000s')],playlists:[card('All Out 2000s','playlist')]}).kind,'playlist');
+  assert.equal(topResult('rap caviar',{tracks:[song('Caviar')],playlists:[card('RapCaviar','playlist')],top:[{kind:'playlist'}]}).kind,'playlist');
+  assert.equal(topResult('blinding lights',{tracks:[song('Blinding Lights','The Weeknd')],playlists:[card('Chill Hits','playlist')],top:[{kind:'song'}]}).kind,'song');
+});
