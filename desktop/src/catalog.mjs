@@ -145,6 +145,15 @@ export class Catalog {
     const albums=[];
     function visit(x,depth=0) { if(!x || depth>10 || albums.length>=40)return; if(Array.isArray(x))x.forEach(y=>visit(y,depth+1));else if(typeof x==='object'){if(text(x.uri).startsWith('spotify:album:')&&x.name)albums.push({uri:x.uri,title:x.name,subtitle:'Album',artwork:artwork(x),type:'album'});else Object.values(x).forEach(y=>visit(y,depth+1));} }
     if(type==='artist') ['albums','singles','popularReleasesAlbums'].forEach(k=>visit(root.discography?.[k]));
-    return {uri,title:root.name||root.profile.name,subtitle:type==='artist'?'Artist':artistNames(root)||root.ownerV2?.data?.name||'Spotify playlist',artwork:artwork(root),description:text(root.description||root.profile?.biography?.text).replace(/<[^>]*>/g,''),tracks:unique(tracks),total,skipped,albums:unique(albums,'uri')};
+    return {uri,title:root.name||root.profile.name,subtitle:type==='artist'?'Artist':artistNames(root)||root.ownerV2?.data?.name||'Spotify playlist',artwork:artwork(root),description:text(root.description||root.profile?.biography?.text).replace(/<[^>]*>/g,''),tracks:unique(tracks),total,skipped,albums:unique(albums,'uri'),...(type==='artist'?{artist:artistInfo(root)}:{})};
   }
+}
+
+const count=value=>{const n=Number(value);return Number.isFinite(n)&&n>=0?n:null;};
+// Same artist-overview fields the Android app reads: stats, verified badge, latest release and related artists.
+export function artistInfo(root){
+  const latestItem=unwrap(root.discography?.latest);
+  const latest=text(latestItem.uri).startsWith('spotify:album:')&&latestItem.name?{uri:latestItem.uri,title:latestItem.name,subtitle:[latestItem.type?String(latestItem.type).toLowerCase().replace(/^./,c=>c.toUpperCase()):'Release',latestItem.date?.year].filter(Boolean).join(' · '),artwork:artwork(latestItem),type:'album'}:null;
+  const related=unique(array(root.relatedContent?.relatedArtists?.items).map(unwrap).filter(x=>text(x.uri).startsWith('spotify:artist:')&&x.profile?.name).map(x=>({uri:x.uri,title:x.profile.name,subtitle:'Artist',artwork:artwork(x),type:'artist'})),'uri').slice(0,20);
+  return {monthlyListeners:count(root.stats?.monthlyListeners),followers:count(root.stats?.followers),verified:root.profile?.verified===true||root.profile?.verified?.verified===true,latest,related};
 }

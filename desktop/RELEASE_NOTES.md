@@ -10,6 +10,8 @@ Desktop alpha for Windows, macOS and Linux.
 - Like and Add to playlist are separate buttons. Song menus add Save for later, Go to artist, Song credits, Sleep timer and Hide song.
 - Queue grouped by where songs came from, with remove, reorder, shuffle-group and clear controls.
 - Player bar tinted by the cover art while playing, a lyrics popup with adjustable text size, and tap a lyric line to jump to it.
+- Song radio and artist radio, and Autoplay that keeps playing similar songs when your queue ends (can be turned off in Profile).
+- Artist pages show monthly listeners, followers, verified status, the latest release and Fans also like.
 - Your Library in the sidebar is grouped into Playlists, Saves, Artists and Podcasts, with a full-page view, sorting and smart playlists by artist.
 
 - Fixes Linux subtitle generation from streamed podcasts by keeping publisher HTTPS and byte-range requests in the app's validated network transport.

@@ -6,7 +6,7 @@ import {readFile} from 'node:fs/promises';
 import {Catalog,resource} from './catalog.mjs';
 import {Store,cleanTrack} from './store.mjs';
 import {Resolver} from './resolver.mjs';
-import {browse,recommendations,albumForTrack} from './discovery.mjs';
+import {browse,recommendations,albumForTrack,radio} from './discovery.mjs';
 import {searchPodcasts,episodes} from './podcasts.mjs';
 import {ArtworkCache} from './artwork.mjs';
 import {SubtitleEngine,lyrics} from './subtitles.mjs';
@@ -34,6 +34,7 @@ async function dispatch(command,value){
     case'browse':return value==='Podcasts'?{title:'Podcasts',subtitle:'Find your next favorite show',shows:await searchPodcasts('popular')}:browse(catalog,string(value));
     case'collection':return catalog.collection(resource(string(value,500)));
     case'album':return albumForTrack(catalog,cleanTrack(value));
+    case'radio':{if(!value||typeof value!=='object')throw Error('Invalid radio request.');const seed={artist:string(value.artist,250),title:typeof value.title==='string'?value.title.slice(0,300):'',isrc:typeof value.isrc==='string'?value.isrc.slice(0,160):'',uri:/^spotify:artist:[A-Za-z0-9]{22}$/.test(value.uri)?value.uri:'',albumArtUrl:typeof value.albumArtUrl==='string'&&value.albumArtUrl.startsWith('https://')?value.albumArtUrl.slice(0,4000):null};const exclude=Array.isArray(value.exclude)?value.exclude.slice(0,300).filter(x=>typeof x==='string'&&x.length<=160):[];return radio(catalog,seed,exclude);}
     case'import':{const uri=resource(string(value,500));if(!/^spotify:(playlist|album):/.test(uri))throw Error('Import a playlist or album.');const collection=await catalog.collection(uri);await store.importCollection(collection);return{library:store.snapshot(),count:collection.tracks.length,skipped:collection.skipped};}
     case'favorite':return store.favorite(value);
     case'save-later':return store.saveLater(value);

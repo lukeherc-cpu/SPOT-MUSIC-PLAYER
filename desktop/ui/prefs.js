@@ -14,6 +14,7 @@ const defaults=()=>({
   releasesView:'list',     // list | grid on artist pages
   smart:[],                // smart playlists: {id,title,artist}
   displayName:'',
+  autoplay:true,           // keep playing similar songs when the queue ends
 });
 function read(){try{const raw=localStorage.getItem(KEY);return raw?{...defaults(),...JSON.parse(raw)}:defaults();}catch{return defaults();}}
 export const prefs=read();

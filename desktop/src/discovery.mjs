@@ -47,3 +47,18 @@ export async function albumForTrack(catalog,song){
   const album=(await catalog.search(`${track.album} ${track.artist}`)).albums.find(x=>norm(x.title)===norm(track.album)&&norm(x.subtitle).includes(norm(track.artist.split(',')[0])));
   if(!album)throw Error("Couldn't find this song's album on Spotify.");return catalog.collection(album.uri);
 }
+
+// Radio: the seed artist's songs plus top songs from up to four related artists, interleaved.
+export async function radio(catalog,seed,exclude=[]){
+  const name=String(seed.artist||'').split(',')[0].trim();if(!name)throw Error('Choose a song or artist for radio.');
+  const lower=name.toLowerCase(),skip=new Set(exclude);if(seed.isrc)skip.add(seed.isrc);
+  const found=await catalog.search(name);
+  const artist=/^spotify:artist:/.test(seed.uri||'')?{uri:seed.uri}:(found.artists||[]).find(a=>a.title.toLowerCase()===lower)||(found.artists||[])[0];
+  const own=[...(found.tracks||[]).filter(t=>t.artist.toLowerCase().includes(lower))];let related=[];
+  if(artist){try{const page=await catalog.collection(artist.uri);own.unshift(...page.tracks);related=(page.artist?.related||[]).slice(0,4);}catch{}}
+  const others=await Promise.all(related.map(r=>catalog.collection(r.uri).then(p=>p.tracks.slice(0,8)).catch(()=>[])));
+  const lanes=[shuffle(distinct(own),hash(name+Date.now())),...others.map((x,i)=>shuffle(x,hash(name+i+Date.now())))].map(l=>l.filter(t=>t.source!=='PODCAST'&&!skip.has(t.isrc)));
+  const out=[];for(let i=0;out.length<50&&lanes.some(l=>i<l.length);i++)for(const lane of lanes)if(lane[i])out.push(lane[i]);
+  const tracks=distinct(out).slice(0,50);if(!tracks.length)throw Error(`Couldn't build a radio for ${name} right now.`);
+  return {title:seed.title?`${seed.title} Radio`:`${name} Radio`,subtitle:`Based on ${seed.title?`${seed.title} by `:''}${name}${related.length?` with ${related.map(r=>r.title).slice(0,3).join(', ')} and more`:''}`,artwork:seed.albumArtUrl||seed.artwork||tracks[0].albumArtUrl,radio:true,tracks};
+}

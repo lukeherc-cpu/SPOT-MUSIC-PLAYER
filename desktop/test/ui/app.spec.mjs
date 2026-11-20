@@ -46,6 +46,7 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     await page.getByRole('button',{name:'Create and add',exact:true}).click();
     await expect(page.locator('#sidebar')).toContainText('Named Playlist');
     await page.getByRole('button',{name:'Options for First UI Song',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Go to song radio',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Go to album',exact:true}).click();
     await expect(page.locator('#search-input')).toHaveCount(0);
     await page.getByRole('button',{name:'Back',exact:true}).click();
@@ -87,6 +88,9 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     await expect(page.locator('html')).toHaveAttribute('data-theme','light');
     await page.screenshot({path:path.join(root,'test-results/screenshots/profile-light.png')});
     await page.getByRole('tab',{name:'Dark',exact:true}).click();
+    await page.getByRole('tab',{name:'Off',exact:true}).click();
+    await expect(page.getByRole('tab',{name:'Off',exact:true})).toHaveAttribute('aria-selected','true');
+    await page.getByRole('tab',{name:'On',exact:true}).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
     await page.getByRole('button',{name:'Home',exact:true}).click();
     await page.screenshot({path:path.join(root,'test-results/screenshots/home.png')});
