@@ -44,7 +44,10 @@ internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, b
                 itemsIndexed(words.lines) { index, line ->
                     Text(line.text.ifBlank { "♪" }, fontSize = if (expanded) 30.sp else 22.sp, lineHeight = if (expanded) 41.sp else 31.sp, fontWeight = FontWeight.Bold,
                         color = if (!words.isSynced || index == active) Color.White else Color.White.copy(alpha = if (index < active) .78f else .4f),
-                        modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Return to cover art", onClick = onCover).padding(vertical = 3.dp))
+                        modifier = Modifier.fillMaxWidth()
+                            .then(if (words.isSynced) Modifier.clickable(onClickLabel = "Play from this line") { onSeek(line.timestampMs) }
+                                else Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {})
+                            .padding(vertical = 3.dp))
                 }
                 item { Spacer(Modifier.height(if (expanded) 140.dp else 50.dp)) }
             }

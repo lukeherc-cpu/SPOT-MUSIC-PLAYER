@@ -90,7 +90,7 @@ class NavigationSmokeTest {
             screenshot(device, "playlist")
             val beforeQueue = data.testMusicPlayer().queue.value.tracks.size
             val songRow = device.findObject(By.text("First UI Song")).visibleBounds
-            device.swipe((device.displayWidth * .82).toInt(), songRow.centerY(), (device.displayWidth * .15).toInt(), songRow.centerY(), 22)
+            device.swipe((device.displayWidth * .15).toInt(), songRow.centerY(), (device.displayWidth * .82).toInt(), songRow.centerY(), 22)
             withTimeout(5000) { data.testMusicPlayer().queue.first { it.tracks.size > beforeQueue && it.tracks.last().isrc == first.isrc } }
             assertTrue(device.wait(Until.hasObject(By.text("First UI Song")), 5000))
             device.findObject(By.text("First UI Song")).longClick()
