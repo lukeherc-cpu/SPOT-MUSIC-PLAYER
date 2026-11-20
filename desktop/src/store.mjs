@@ -9,7 +9,7 @@ export function cleanTrack(t) {
     transcripts:Array.isArray(t.transcripts)?t.transcripts.slice(0,10).filter(x=>https(x.url)&&typeof x.type==='string').map(x=>({url:https(x.url),type:x.type.slice(0,100),language:String(x.language||'').slice(0,30)})):[],
     ...(t.source==='PODCAST'?{directAudioUrl:https(t.directAudioUrl),feedUrl:https(t.feedUrl),description:String(t.description||'').slice(0,4000),published:String(t.published||'').slice(0,100)}:{})};
 }
-const empty=()=>({version:1,favorites:[],playlists:[],shows:[],history:[],positions:{},saves:[],hidden:[],seen:{}});
+const empty=()=>({version:1,favorites:[],playlists:[],shows:[],history:[],positions:{},saves:[],hidden:[],seen:{},versions:{}});
 export class Store {
   constructor(directory){this.directory=directory;this.file=path.join(directory,'library.json');this.state=empty();this.tail=Promise.resolve();}
   async load(){await mkdir(this.directory,{recursive:true});try{const data=JSON.parse(await readFile(this.file,'utf8'));if(data.version!==1)throw Error('Unsupported library version.');this.state={...empty(),...data};}catch(e){if(e.code!=='ENOENT')throw e;}return this.snapshot();}
@@ -24,12 +24,12 @@ export class Store {
     if(!tracks.length)throw Error('No available songs to import.');
     return this.change(s=>s.playlists.unshift({id:randomUUID(),title:String(collection.title).slice(0,300),artwork:collection.artwork||null,tracks,createdAt:Date.now()}));
   }
-  /** Adds another version of a song (such as its clean version) right after it in Liked Songs, Bookmarked and every playlist. Both stay. */
+  /** Adds another version of a song (such as its clean version) right after it in Liked Songs, Bookmarked and every playlist, and remembers it so search shows both. Both stay. */
   addVersion(oldIsrc,raw){
     const next=cleanTrack(raw);if(typeof oldIsrc!=='string'||!oldIsrc)throw Error('Invalid song.');
     return this.change(s=>{
       const add=list=>{if(!Array.isArray(list)||!list.some(t=>t.isrc===oldIsrc))return list;const rest=list.filter(t=>t.isrc!==next.isrc),at=rest.findIndex(t=>t.isrc===oldIsrc);return [...rest.slice(0,at+1),next,...rest.slice(at+1)];};
-      s.favorites=add(s.favorites);s.saves=add(s.saves);for(const p of s.playlists)p.tracks=add(p.tracks);
+      s.versions={...(s.versions||{}),[oldIsrc]:next};s.favorites=add(s.favorites);s.saves=add(s.saves);for(const p of s.playlists)p.tracks=add(p.tracks);
     });
   }
   markSeen(feedUrl){if(typeof feedUrl!=='string'||!feedUrl.startsWith('https://'))throw Error('Invalid podcast.');return this.change(s=>{s.seen={...(s.seen||{}),[feedUrl]:Date.now()};const keys=Object.keys(s.seen);if(keys.length>500)delete s.seen[keys[0]];});}

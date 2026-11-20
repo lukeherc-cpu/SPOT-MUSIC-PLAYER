@@ -41,6 +41,13 @@ export function pairVersions(tracks){
   for(const t of tracks){const k=versionKey(t);if(done.has(k))continue;done.add(k);const g=groups.get(k);const e=g.filter(x=>x.isExplicit===true),c=g.filter(x=>x.isExplicit!==true);out.push(...(e.length&&c.length?[e[0],c[0],...e.slice(1),...c.slice(1)]:g));}
   return out;
 }
+/** Puts each clean version the person made right after its explicit original, without duplicates. */
+export function withSavedVersions(tracks,versions){
+  if(!versions||!tracks.some(t=>versions[t.isrc]))return tracks;
+  const cleanIds=new Set(tracks.map(t=>versions[t.isrc]?.isrc).filter(Boolean)),out=[];
+  for(const t of tracks){if(cleanIds.has(t.isrc))continue;out.push(t);const c=versions[t.isrc];if(c&&!out.some(x=>x.isrc===c.isrc))out.push(c);}
+  return out;
+}
 // If the first song is explicit and no clean version came back, look for one so both show up first.
 export async function withCleanVersion(catalog,tracks){
   const first=tracks[0];if(!first||first.isExplicit!==true)return pairVersions(tracks);

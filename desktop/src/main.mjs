@@ -11,7 +11,7 @@ import {findClean} from './clean.mjs';
 import {searchPodcasts,episodes} from './podcasts.mjs';
 import {ArtworkCache} from './artwork.mjs';
 import {SubtitleEngine,lyrics} from './subtitles.mjs';
-import {fold,topResult,withCleanVersion} from './search.mjs';
+import {fold,topResult,withCleanVersion,withSavedVersions} from './search.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 protocol.registerSchemesAsPrivileged([{scheme:'spot',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-audio',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}},{scheme:'spot-art',privileges:{standard:true,secure:true,corsEnabled:true}}]);
@@ -102,7 +102,7 @@ async function dispatch(command,value){
       // When Spotify's own top result is a podcast, make sure that show is in the playable podcast list.
       const spotifyTop=found.top?.[0];
       if(spotifyTop?.kind==='podcast'&&!shows.some(x=>fold(x.title)===fold(spotifyTop.title))){try{const exact=(await searchPodcasts(spotifyTop.title)).find(x=>fold(x.title)===fold(spotifyTop.title));if(exact)shows=[exact,...shows.filter(x=>x.feedUrl!==exact.feedUrl)];}catch{}}
-      found.tracks=await withCleanVersion(catalog,found.tracks||[]);
+      found.tracks=withSavedVersions(await withCleanVersion(catalog,found.tracks||[]),store.snapshot().versions);
       return{...found,shows,top:topResult(q,{...found,shows}),podcastNotice:podcasts.status==='rejected'?'Podcast directory is unavailable. Try again.':null};}
     case'home':if(value===true){homeAt=0;homeNonce++;}return home();
     case'home-saved':return homeCache||savedHome();

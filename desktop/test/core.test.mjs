@@ -7,6 +7,7 @@ import {Catalog,decodeTrack,resource,artistInfo} from '../src/catalog.mjs';
 import {parseFeed} from '../src/podcasts.mjs';
 import {publicAddress} from '../src/public-network.mjs';
 import {Store} from '../src/store.mjs';
+import {withSavedVersions} from '../src/search.mjs';
 import {Resolver,rewriteManifest} from '../src/resolver.mjs';
 import {recommendations,browse,albumForTrack,US,seedArtists,radio} from '../src/discovery.mjs';
 import {parseTranscript,cleanVersion,cleanLyricText,decoderInput,lyrics,pickLyrics} from '../src/subtitles.mjs';
@@ -220,6 +221,10 @@ test('a clean version is added right after the explicit song everywhere it is sa
     const s=await store.addVersion(a.isrc,b);
     assert.deepEqual(s.favorites.map(x=>x.isrc),[a.isrc,b.isrc]);assert.deepEqual(s.playlists[0].tracks.map(x=>x.isrc),[a.isrc,b.isrc,'spotify:c']);
     assert.equal(s.favorites[1].youtubeVideoId,'bbbbbbbbbbb');assert.equal(s.saves.length,0);
+    assert.equal(s.versions[a.isrc].isrc,b.isrc);
+    const other={isrc:'spotify:o',title:'O',artist:'Z'};
+    assert.deepEqual(withSavedVersions([other,a,{isrc:'spotify:d',title:'D',artist:'Z'}],s.versions).map(x=>x.isrc),['spotify:o',a.isrc,b.isrc,'spotify:d']);
+    assert.deepEqual(withSavedVersions([b,other,a],s.versions).map(x=>x.isrc),['spotify:o',a.isrc,b.isrc]);
     await store.markSeen('https://feed.example/show.xml');assert.ok(store.snapshot().seen['https://feed.example/show.xml']>0);
   }finally{await rm(directory,{recursive:true,force:true});}
 });
