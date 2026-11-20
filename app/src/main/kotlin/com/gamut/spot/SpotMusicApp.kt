@@ -301,7 +301,19 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             item { TextButton(onClick = { navigate(Page.Import) }, modifier = Modifier.padding(8.dp)) { Icon(Icons.Outlined.Download, null); Spacer(Modifier.width(8.dp)); Text("Import from Spotify", color = Color.White) } }
                         }
                     }
+<<<<<<< HEAD
                     Page.Import -> SpotImportScreen(vm, importLink, { importLink = it }, importing, onBack = { navigate(Page.Library) }, onImportLink = { keyboard?.hide(); vm.importSpotify(importLink) })
+=======
+                    Page.Import -> Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) { SIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = { navigate(Page.Library) }); Text("Import from Spotify", style = MaterialTheme.typography.titleLarge) }
+                        Text("Bring your music with you", style = MaterialTheme.typography.headlineLarge)
+                        Text("Paste a public Spotify playlist or album link. We'll keep its songs, order and artwork in your library.", color = Muted)
+                        OutlinedTextField(importLink, { importLink = it }, label = { Text("Spotify link") }, placeholder = { Text("https://open.spotify.com/playlist/…") }, modifier = Modifier.fillMaxWidth(), maxLines = 3, enabled = !importing)
+                        Button(onClick = { keyboard?.hide(); vm.importSpotify(importLink) }, enabled = importLink.isNotBlank() && !importing, modifier = Modifier.fillMaxWidth().height(50.dp), shape = CircleShape) { Text(if (importing) "Importing…" else "Import songs", fontWeight = FontWeight.Bold) }
+                        if (importing) WordsSkeleton()
+                        Text("Private playlists and Liked Songs need account access. You can make a playlist public and import its link. Your Spotify library is never modified.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    }
+>>>>>>> origin/claude/project-thread-vp74s9
                     Page.Settings -> SpotSettings(vm, onBack = { navigate(Page.Home) }, onImport = { navigate(Page.Import) })
                 }
             }
