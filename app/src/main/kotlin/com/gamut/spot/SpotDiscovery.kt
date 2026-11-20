@@ -8,30 +8,65 @@ import com.gamut.core.network.SpotifySearch
 import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
-enum class BrowseCategory(val title: String, val color: Long, val query: String, val genre: String? = null) {
-    Music("Music", 0xFFE0148C, "discover new music"),
-    Podcasts("Podcasts", 0xFF006450, "popular"),
-    NewReleases("New releases", 0xFFE66A20, "new music friday"),
-    Charts("Charts", 0xFF8D67AB, ""),
+enum class BrowseGroup { Top, More, Genres, Podcasts, Moods }
+
+enum class BrowseCategory(val title: String, val color: Long, val query: String, val genre: String? = null, val group: BrowseGroup = BrowseGroup.Genres, val podcast: Boolean = false) {
+    Music("Music", 0xFFE0148C, "discover new music", group = BrowseGroup.Top),
+    Podcasts("Podcasts", 0xFF006450, "popular", group = BrowseGroup.Top, podcast = true),
+    MadeForYou("Made For You", 0xFF1E3264, "", group = BrowseGroup.Top),
+    NewReleases("New releases", 0xFFE66A20, "new music friday", group = BrowseGroup.Top),
+    Charts("Charts", 0xFF8D67AB, "", group = BrowseGroup.Top),
+    Fitness("Fitness", 0xFF777777, "workout", group = BrowseGroup.Top),
+    Discover("Discover", 0xFF8D67AB, "fresh finds", group = BrowseGroup.More),
+    Radio("Radio", 0xFF509BF5, "radio", group = BrowseGroup.More),
+    MusicVideos("Music videos", 0xFFE13300, "music video playlist", group = BrowseGroup.More),
+    Throwback("Throwback", 0xFFBA5D07, "throwback hits", group = BrowseGroup.More),
     Indie("Indie", 0xFF608108, "indie", "indie"),
     Alternative("Alternative", 0xFFBC5900, "alternative", "alternative"),
     Pop("Pop", 0xFF8D67AB, "pop", "pop"),
     HipHop("Hip-Hop", 0xFFBA5D07, "hip hop", "hip-hop"),
+    Rock("Rock", 0xFFE91429, "rock", "rock"),
+    RnB("R&B", 0xFFDC148C, "r&b", "r-n-b"),
+    Electronic("Dance/Electronic", 0xFF0D73EC, "dance electronic", "edm"),
+    Country("Country", 0xFFD84000, "country", "country"),
+    Latin("Latin", 0xFFE1118C, "latin", "latin"),
     Ambient("Ambient", 0xFF477D95, "ambient", "ambient"),
     Folk("Folk & Acoustic", 0xFFB49A6D, "folk acoustic", "folk"),
+    Jazz("Jazz", 0xFF1E3264, "jazz", "jazz"),
+    Classical("Classical", 0xFF7D4B32, "classical", "classical"),
+    Comedy("Comedy", 0xFFAF2896, "comedy", group = BrowseGroup.Podcasts, podcast = true),
+    TrueCrime("True crime", 0xFF503750, "true crime", group = BrowseGroup.Podcasts, podcast = true),
+    News("News & politics", 0xFF477D95, "news politics", group = BrowseGroup.Podcasts, podcast = true),
+    Sports("Sports", 0xFF27856A, "sports", group = BrowseGroup.Podcasts, podcast = true),
+    Learning("Educational", 0xFF0D73EC, "educational", group = BrowseGroup.Podcasts, podcast = true),
+    Business("Business & technology", 0xFF1E3264, "business technology", group = BrowseGroup.Podcasts, podcast = true),
+    Chill("Chill", 0xFFD84000, "chill", group = BrowseGroup.Moods),
+    Mood("Mood", 0xFFE1118C, "mood", group = BrowseGroup.Moods),
+    Party("Party", 0xFF537AA1, "party", group = BrowseGroup.Moods),
+    Focus("Focus", 0xFF503750, "focus", group = BrowseGroup.Moods),
+    Sleep("Sleep", 0xFF1E3264, "sleep", group = BrowseGroup.Moods),
+    Workout("Workout", 0xFF777777, "workout", group = BrowseGroup.Moods),
+    Romance("Romance", 0xFF8C1932, "love songs", group = BrowseGroup.Moods),
+    Travel("Travel", 0xFF148A08, "road trip", group = BrowseGroup.Moods),
 }
 
+@Serializable
 data class DailyMix(val id: String, val title: String, val subtitle: String, val tracks: List<Track>) {
     val artwork: String? get() = tracks.firstOrNull { it.albumArtUrl != null }?.albumArtUrl
 }
 data class BrowseContent(val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList())
-data class HomeRecommendations(val mixes: List<DailyMix>, val rails: List<MusicRail>, val songs: List<Track>)
+data class HomeRecommendations(val mixes: List<DailyMix>, val rails: List<MusicRail>, val songs: List<Track>, val personal: List<DailyMix> = emptyList())
 
 /** Public Spotify discovery plus local listening-history ranking; no private Spotify account feeds. */
 class SpotDiscovery @Inject constructor(private val catalog: SpotifyCatalog) {
     suspend fun browse(category: BrowseCategory): BrowseContent {
+        if (category == BrowseCategory.MadeForYou) return BrowseContent()
         if (category == BrowseCategory.Charts) {
             // These are Spotify chart collections, not search results for the word "charts".
             val us = catalog.collection(US_TOP_50.uri)
@@ -59,8 +94,13 @@ class SpotDiscovery @Inject constructor(private val catalog: SpotifyCatalog) {
     suspend fun recommendations(recent: List<Track>, favorites: List<Track>, rotation: Long): HomeRecommendations {
         val seeds = seedArtists(recent, favorites)
         val music = (recent + favorites).filter { it.source != TrackSource.PODCAST }.distinctBy { it.isrc }
-        val results = seeds.associateWith { seed ->
-            try { catalog.searchAll(seed) } catch (e: CancellationException) { throw e } catch (_: Exception) { SpotifySearch() }
+        // Every search runs at the same time, so the mixes (and their artwork) arrive after one round trip.
+        suspend fun safe(query: String) = try { catalog.searchAll(query) } catch (e: CancellationException) { throw e } catch (_: Exception) { SpotifySearch() }
+        val moodQueries = MOODS.mapIndexed { index, mood -> "${mood.query} ${seeds[index % seeds.size]}" }
+        val (results, moodResults) = coroutineScope {
+            val seedJobs = seeds.map { seed -> async { seed to safe(seed) } }
+            val moodJobs = moodQueries.map { query -> async { query to safe(query) } }
+            seedJobs.awaitAll().toMap() to moodJobs.awaitAll().toMap()
         }
         val random = Random((rotation xor fingerprint(recent, favorites).hashCode().toLong()).toInt())
         val mixes = (0 until minOf(3, seeds.size)).map { index ->
@@ -80,10 +120,25 @@ class SpotDiscovery @Inject constructor(private val catalog: SpotifyCatalog) {
                 if (cards.isNotEmpty()) add(MusicRail("More like $seed", cards))
             }
         }
-        return HomeRecommendations(mixes, rails, music.take(10))
+        val personal = buildList {
+            // "<Artist> Mix" for the artists heard most, then mood mixes built from searches near those artists.
+            seeds.take(3).forEach { seed ->
+                val tracks = (music.filter { it.artist.contains(seed, true) } + results[seed]?.tracks.orEmpty()).distinctBy { it.isrc }.shuffled(random).take(30)
+                if (tracks.size >= 3) add(DailyMix("artist-mix-${seed.lowercase()}", "$seed Mix", "${tracks.map { it.artist.substringBefore(',') }.distinct().take(3).joinToString(", ")} and more", tracks))
+            }
+            MOODS.forEachIndexed { index, mood ->
+                val seed = seeds[index % seeds.size]
+                val tracks = moodResults[moodQueries[index]]?.tracks.orEmpty().distinctBy { it.isrc }.shuffled(random).take(30)
+                if (tracks.size >= 3) add(DailyMix("mood-mix-${mood.title.lowercase()}", "${mood.title} Mix", "${mood.blurb} with $seed and more", tracks))
+            }
+        }
+        return HomeRecommendations(mixes, rails, music.take(10), personal)
     }
 
+    private class MoodMix(val title: String, val query: String, val blurb: String)
+
     companion object {
+        private val MOODS = listOf(MoodMix("Chill", "chill", "Laid-back picks"), MoodMix("Upbeat", "upbeat", "Feel-good energy"), MoodMix("Late Night", "late night", "After-hours listening"))
         fun starterContent(category: BrowseCategory): BrowseContent = if (category == BrowseCategory.Charts)
             BrowseContent(listOf(MusicRail("Top charts in the US", listOf(US_TOP_50)), MusicRail("Around the world", listOf(GLOBAL_TOP_50)))) else BrowseContent()
         val US_TOP_50 = SpotifyCard("spotify:playlist:37i9dQZEVXbLRQDuF5jeBp", "Top 50 - USA", "The most played tracks in the United States", "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_us_default.jpg", "playlist")

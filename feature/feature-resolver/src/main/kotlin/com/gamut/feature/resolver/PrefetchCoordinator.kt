@@ -53,6 +53,19 @@ class PrefetchCoordinator @Inject constructor(
         }
     }
 
+    /** Gets stream links ready for songs played before, one at a time, so replaying them starts faster. */
+    fun prepareRecent(tracks: List<Track>) {
+        val songs = tracks.filter { it.source != com.gamut.core.model.TrackSource.PODCAST && !it.isrc.startsWith("local:") }.distinctBy { it.isrc }.take(RECENT_COUNT)
+        if (songs.isEmpty()) return
+        scope.launch {
+            for (track in songs) {
+                if (!allowed()) return@launch
+                savedMutex.lock()
+                try { resolve(track).onSuccess { audio.audioUrl(it.youtubeVideoId) } } finally { savedMutex.unlock() }
+            }
+        }
+    }
+
     private fun allowed(): Boolean {
         if (!settings.state.value.preload) return false
         if (settings.state.value.preloadUnmeteredOnly && !settings.onUnmeteredNetwork()) return false
@@ -70,6 +83,7 @@ class PrefetchCoordinator @Inject constructor(
 
     private companion object {
         const val PREFETCH_COUNT = 2
+        const val RECENT_COUNT = 6
         const val DEBOUNCE_MS = 350L
         const val LOW_BATTERY_PERCENT = 15
     }

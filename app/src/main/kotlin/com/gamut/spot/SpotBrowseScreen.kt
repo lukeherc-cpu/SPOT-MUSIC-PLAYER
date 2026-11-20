@@ -31,12 +31,14 @@ internal fun SpotBrowseScreen(state: SpotBrowse, home: SpotHome, vm: SpotViewMod
                     BrowseCategory.Music -> "Discover new music, explore your favorites and find your next obsession."
                     BrowseCategory.NewReleases -> "Fresh albums, singles and New Music Friday."
                     BrowseCategory.Podcasts -> "Find your next favorite show."
+                    BrowseCategory.MadeForYou -> "Mixes built from what you play, refreshed through the day."
                     else -> "Explore ${state.category.title.lowercase()} playlists, albums and songs."
                 }, color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
-        if (state.category == BrowseCategory.Music) item { DailyMixRail(home.mixes, home.loading, vm::openMix) }
-        if (state.loading) item { DiscoverySkeleton() }
+        if (state.category == BrowseCategory.Music || state.category == BrowseCategory.MadeForYou) item { DailyMixRail(home.mixes, home.loading, vm::openMix) }
+        if (state.category == BrowseCategory.MadeForYou) item { DailyMixRail(home.personal, home.loading, vm::openMix, title = "Your mixes", empty = "Play a few more songs to unlock mixes like Chill Mix.") }
+        if (state.loading && state.category != BrowseCategory.MadeForYou) item { DiscoverySkeleton() }
         state.error?.let { error -> item { ErrorRow(error) { vm.openBrowse(state.category) } } }
         state.content.rails.forEach { rail -> item { SCardRail(rail.title, rail.cards, vm::openCard) } }
         if (state.content.songs.isNotEmpty()) item { SHeading(if (state.category == BrowseCategory.Charts) "Leading the US chart" else "Songs to discover") }
@@ -46,18 +48,18 @@ internal fun SpotBrowseScreen(state: SpotBrowse, home: SpotHome, vm: SpotViewMod
 }
 
 @Composable
-internal fun DailyMixRail(mixes: List<DailyMix>, loading: Boolean, open: (DailyMix) -> Unit) {
-    SHeading("Daily Mixes")
-    if (loading) RailSkeleton()
+internal fun DailyMixRail(mixes: List<DailyMix>, loading: Boolean, open: (DailyMix) -> Unit, title: String = "Daily Mixes", empty: String = "Listen to music to shape your mixes.") {
+    SHeading(title)
+    if (loading && mixes.isEmpty()) RailSkeleton()
     else if (mixes.isEmpty()) {
-        Text("Listen to music to shape your mixes.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        Text(empty, color = Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     } else LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         itemsIndexed(mixes, key = { _, mix -> mix.id }) { index, mix ->
             Column(Modifier.width(152.dp).clickable { open(mix) }) {
                 Box(Modifier.size(152.dp).clip(RoundedCornerShape(4.dp))) {
-                    SArt(mix.artwork, Modifier.fillMaxSize())
-                    Text(mix.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = Color.Black,
-                        modifier = Modifier.fillMaxWidth().background(listOf(Green, Color(0xFFB49ADC), Color(0xFFF4BB6C))[index % 3]).padding(8.dp).align(androidx.compose.ui.Alignment.BottomCenter))
+                    SArt(spotifyThumb(mix.artwork), Modifier.fillMaxSize())
+                    Text(mix.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = Color.Black, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth().background(listOf(Green, Color(0xFFB49ADC), Color(0xFFF4BB6C), Color(0xFF9CF0E1), Color(0xFFF59B23))[index % 5]).padding(8.dp).align(androidx.compose.ui.Alignment.BottomCenter))
                 }
                 Text(mix.subtitle, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
             }

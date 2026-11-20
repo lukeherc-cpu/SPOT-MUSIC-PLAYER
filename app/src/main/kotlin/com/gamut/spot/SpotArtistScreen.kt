@@ -70,7 +70,13 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedButton(onClick = { vm.followArtist(detail) }, shape = CircleShape) { Text(if (detail.key in follows) "Following" else "Follow", color = Color.White) }
                         Spacer(Modifier.weight(1f))
-                        FilledIconButton(onClick = { vm.playCollection(detail.tracks) }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(54.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) { Icon(Icons.Filled.PlayArrow, "Play artist", Modifier.size(32.dp)) }
+                        val playback by vm.player.playbackState.collectAsState()
+                        val playContext by vm.playContext.collectAsState()
+                        val here = playContext == detail.key && playing != null
+                        val running = here && playback is com.gamut.core.model.PlaybackState.Playing
+                        FilledIconButton(onClick = { when { running -> vm.player.pause(); here -> vm.player.resume(); else -> vm.playCollection(detail.tracks, detail.key) } }, enabled = detail.tracks.isNotEmpty(), modifier = Modifier.size(54.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Green, contentColor = Color.Black)) {
+                            if (running) Icon(Icons.Filled.Pause, "Pause artist", Modifier.size(32.dp)) else Icon(Icons.Filled.PlayArrow, "Play artist", Modifier.size(32.dp))
+                        }
                     }
                     if (detail.loading) DiscoverySkeleton()
                     detail.error?.let { ErrorRow(it, vm::retryDetail) }
@@ -86,7 +92,7 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
                 }
             }
             item(key = "songs") { SHeading("Popular") }
-            itemsIndexed(popular, key = { index, song -> "popular-$index-${song.isrc}" }) { index, song -> STrack(song, song.isrc == playing, song.isrc in favorites, number = index + 1, onPlay = { vm.play(song, detail.tracks) }, onMore = { onMore(song) }) }
+            itemsIndexed(popular, key = { index, song -> "popular-$index-${song.isrc}" }) { index, song -> STrack(song, song.isrc == playing, song.isrc in favorites, number = index + 1, onPlay = { vm.play(song, detail.tracks, detail.key) }, onMore = { onMore(song) }) }
             item(key = "yours") {
                 Column {
                     SHeading("Your most listened to")

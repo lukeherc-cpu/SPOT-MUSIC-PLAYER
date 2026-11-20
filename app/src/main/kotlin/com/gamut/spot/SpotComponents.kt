@@ -98,11 +98,11 @@ internal fun SaveToggle(saved: Boolean, description: String, idleTint: Color = C
 internal object SpotProfile { var photo by mutableStateOf<Any?>(null) }
 
 @Composable
-internal fun SAvatar(onClick: () -> Unit) {
-    Box(Modifier.size(34.dp).clip(CircleShape).background(Green).clickable(onClick = onClick).semantics { contentDescription = "Profile and settings" }, contentAlignment = Alignment.Center) {
+internal fun SAvatar(onClick: (() -> Unit)?, size: Dp = 34.dp) {
+    Box(Modifier.size(size).clip(CircleShape).background(Green).then(if (onClick != null) Modifier.clickable(onClick = onClick).semantics { contentDescription = "Profile and settings" } else Modifier), contentAlignment = Alignment.Center) {
         val photo = SpotProfile.photo
         if (photo != null) coil.compose.AsyncImage(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else Icon(Icons.Filled.Person, null, tint = Color(0xFF1B1226), modifier = Modifier.size(24.dp))
+        else Icon(Icons.Filled.Person, null, tint = Color(0xFF1B1226), modifier = Modifier.size(size * .7f))
     }
 }
 
@@ -190,5 +190,8 @@ internal fun SLibraryRow(title: String, subtitle: String, image: String?, liked:
         }
     }
 }
+
+/** Spotify's 300px cover instead of the 640px one: tiles and rails load faster and look the same. */
+internal fun spotifyThumb(url: String?): String? = url?.replace("ab67616d0000b273", "ab67616d00001e02")
 
 internal fun timeLabel(ms: Long): String = "${ms.coerceAtLeast(0) / 60000}:${(ms.coerceAtLeast(0) / 1000 % 60).toString().padStart(2, '0')}"
