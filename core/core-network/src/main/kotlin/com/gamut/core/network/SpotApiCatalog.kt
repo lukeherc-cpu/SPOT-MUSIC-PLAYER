@@ -181,9 +181,47 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         } finally { gate.unlock() }
     }
 
-    override suspend fun accountName(): String? = webApi("/v1/me").s("display_name").ifBlank { null }
+    override suspend fun accountName(): String? {
+        try { webApi("/v1/me").s("display_name").ifBlank { null }?.let { return it } } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        return try { execute("profileAttributes", buildJsonObject {}).o("data").o("me").o("profile").s("name").ifBlank { null } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+    }
 
     override suspend fun libraryPlaylists(): List<SpotifyCard> {
+        // The Web API first, then GraphQL, which is how the web player itself reads Your Library.
+        var failure: Exception? = null
+        var answered = false
+        for (source in listOf<suspend () -> List<SpotifyCard>>({ libraryFromWebApi() }, { libraryFromGraph() })) {
+            try { val found = source(); answered = true; if (found.isNotEmpty()) return found }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { failure = e }
+        }
+        if (answered) return emptyList()
+        throw failure ?: changed()
+    }
+
+    private suspend fun libraryFromGraph(): List<SpotifyCard> {
+        if (account == null) throw CatalogException(401, "Sign in to Spotify to see your library.")
+        val found = linkedMapOf<String, SpotifyCard>()
+        var offset = 0
+        do {
+            val vars = buildJsonObject {
+                put("filters", buildJsonArray { add("Playlists") }); put("order", JsonNull); put("textFilter", "")
+                put("features", buildJsonArray { add("LIKED_SONGS"); add("YOUR_EPISODES") })
+                put("limit", 50); put("offset", offset); put("flatten", true); put("expandedFolders", buildJsonArray {})
+                put("folderUri", JsonNull); put("includeFoldersWhenFlattening", false)
+            }
+            val root = execute("libraryV3", vars).o("data").o("me").o("libraryV3")
+            val items = root.a("items")
+            items.forEach { entry ->
+                val item = unwrap(entry); val uri = item.s("uri")
+                if (uri.startsWith("spotify:playlist:") && item.s("name").isNotBlank())
+                    found.putIfAbsent(uri, SpotifyCard(uri, item.s("name"), item.o("ownerV2").o("data").s("name").ifBlank { "Playlist" }, artwork(item), "playlist"))
+            }
+            offset += items.size
+        } while (items.isNotEmpty() && offset < root.n("totalCount") && offset < 2_000)
+        return found.values.toList()
+    }
+
+    private suspend fun libraryFromWebApi(): List<SpotifyCard> {
         val found = mutableListOf<SpotifyCard>()
         var offset = 0
         do {
@@ -216,7 +254,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
                 is JsonObject -> {
                     val uri = value.s("uri")
                     if (uri.startsWith("spotify:playlist:") && value.s("name").isNotBlank())
-                        keep(SpotifyCard(uri, value.s("name"), value.s("description").replace(Regex("<[^>]*>"), "").ifBlank { "Made for you" }, bestImage(value.a("images")) ?: artwork(value), "playlist"))
+                        keep(SpotifyCard(uri, value.s("name"), value.s("description").replace(Regex("<[^>]*>"), "").ifBlank { "Made for you" }, (value["images"] as? JsonArray)?.let { bestImage(it) } ?: artwork(value), "playlist"))
                     value.values.forEach { visit(it, depth + 1) }
                 }
                 is JsonArray -> value.forEach { visit(it, depth + 1) }
@@ -226,6 +264,11 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         for (path in listOf("/v1/views/made-for-x", "/v1/browse/categories/0JQ5DAt0tbjZptfcdMSKl3/playlists")) {
             try { visit(webApi(path, listOf("limit" to "50", "content_limit" to "50", "locale" to "en")), 0) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
         }
+        // The signed-in home feed holds the Made For You shelf with every Daily Mix.
+        if (found.isEmpty()) try {
+            val deviceId = client.cookieJar.loadForRequest("https://open.spotify.com/".toHttpUrl()).firstOrNull { it.name == "sp_t" }?.value.orEmpty()
+            visit(execute("home", buildJsonObject { put("timeZone", java.util.TimeZone.getDefault().id); put("sp_t", deviceId); put("facet", ""); put("sectionItemsLimit", 30) }), 0)
+        } catch (e: CancellationException) { throw e } catch (_: Exception) {}
         // Signed in, Spotify's search returns the listener's own mixes too.
         for (query in listOf("Daily Mix", "Discover Weekly", "Release Radar", "On Repeat", "Repeat Rewind", "Mix")) {
             try { searchAll(query).playlists.forEach(::keep) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
@@ -244,6 +287,16 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         for (url in candidates.take(10)) {
             if (visitedBundles.add(url)) discoverHashes(request(url))
             hashes[operation]?.let { return it }
+        }
+        if (kind == "search") {
+            // Library, home and profile queries live in other route bundles; look through those once.
+            val hint = when (operation) { "libraryV3" -> "librar"; "home" -> "home"; else -> "" }
+            val rest = bundleUrls.filter { it !in visitedBundles }.sortedByDescending { hint.isNotEmpty() && it.contains(hint, true) }
+            for (url in rest.take(40)) {
+                visitedBundles.add(url)
+                try { discoverHashes(request(url)) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                hashes[operation]?.let { return it }
+            }
         }
         return when (operation) {
             "getAlbum" -> "0b6ce3511e1b02e4a40fa95440f992acbe85080eb308af9194322d708fc1914f"
@@ -304,9 +357,16 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
     private suspend fun json(url: String, body: JsonObject? = null, params: List<Pair<String, String>> = emptyList(), headers: Map<String, String> = emptyMap()): JsonObject =
         try { Json.parseToJsonElement(request(url, body, params, headers)).obj() } catch (e: CatalogException) { throw e } catch (_: Exception) { changed() }
 
-    private suspend fun request(url: String, body: JsonObject? = null, params: List<Pair<String, String>> = emptyList(), headers: Map<String, String> = emptyMap()): String {
+    private suspend fun request(url: String, body: JsonObject? = null, params: List<Pair<String, String>> = emptyList(), headers: Map<String, String> = emptyMap(), hops: Int = 0): String =
+        try { fetch(url, body, params, headers) } catch (e: Redirect) {
+            if (hops >= 3 || body != null) throw CatalogException(e.code, "Spotify catalog request failed (HTTP ${e.code}).")
+            request(e.location, null, emptyList(), headers, hops + 1)
+        }
+    private class Redirect(val code: Int, val location: String) : Exception()
+
+    private suspend fun fetch(url: String, body: JsonObject? = null, params: List<Pair<String, String>> = emptyList(), headers: Map<String, String> = emptyMap()): String {
         val target = url.toHttpUrl()
-        require(target.isHttps && target.host in setOf("open.spotify.com", "open.spotifycdn.com", "api-partner.spotify.com", "clienttoken.spotify.com", "api.spotify.com"))
+        require(target.isHttps && target.host in hosts)
         val builder = target.newBuilder()
         params.forEach { builder.addQueryParameter(it.first, it.second) }
         val req = Request.Builder().url(builder.build())
@@ -324,6 +384,8 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
                     override fun onResponse(call: Call, response: Response) {
                         try {
                             val text = response.use {
+                                val location = it.header("Location")?.let { loc -> it.request.url.resolve(loc) }
+                                if (it.code in 300..399 && location != null && location.isHttps && location.host in hosts) throw Redirect(it.code, location.toString())
                                 if (!it.isSuccessful) throw CatalogException(it.code, "Spotify catalog request failed (HTTP ${it.code}, ${target.host}${target.encodedPath}).")
                                 val limit = if (target.host == "open.spotifycdn.com") 16_000_000L else 4_000_000L
                                 val source = it.body?.source() ?: error("Empty catalog response")
@@ -337,6 +399,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
             }
         }
     }
+    private val hosts = setOf("open.spotify.com", "open.spotifycdn.com", "api-partner.spotify.com", "clienttoken.spotify.com", "api.spotify.com")
     private fun changed(): Nothing = throw CatalogException(502, "Spotify's catalog response has changed. Check for a Cadence update.")
 
     companion object {
