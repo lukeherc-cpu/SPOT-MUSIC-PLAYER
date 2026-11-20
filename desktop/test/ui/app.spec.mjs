@@ -37,7 +37,8 @@ test('desktop library, dedicated browse pages, album menu, cached playback and s
     await expect(page.getByRole('heading',{name:'UI Reference Playlist',exact:true})).toBeVisible();
     await expect(page.getByRole('checkbox')).toHaveCount(0);
     const row=page.locator('#content .song').filter({hasText:'First UI Song'});
-    await row.click({modifiers:['Control'],position:{x:300,y:20}});
+    // Cmd-click on macOS (where Ctrl-click opens the context menu), Ctrl-click elsewhere.
+    await row.click({modifiers:['ControlOrMeta'],position:{x:300,y:20}});
     await expect(page.locator('#content .bulk')).toContainText('1 selected');
     await row.click({button:'right',position:{x:300,y:20}});
     await expect(page.getByRole('menu',{name:'First UI Song'})).toBeVisible();
