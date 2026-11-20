@@ -131,8 +131,9 @@ class NavigationSmokeTest {
             assertTrue(device.wait(Until.hasObject(By.desc("Minimize text")), 5000))
             assertNull(device.findObject(By.desc("Playback position")))
             device.findObject(By.desc("Minimize text")).click()
-            assertTrue(device.wait(Until.hasObject(By.desc("Show cover art")), 5000))
-            device.findObject(By.desc("Show cover art")).click()
+            assertTrue(device.wait(Until.hasObject(By.desc("Lyrics, tap to return to cover art")), 5000))
+            assertNull(device.findObject(By.text("Tap for lyrics")))
+            device.findObject(By.desc("Lyrics, tap to return to cover art")).click()
             assertTrue(device.wait(Until.hasObject(By.desc("Cover art, show lyrics")), 5000))
             val restored = device.findObject(By.desc("Cover art, show lyrics")).visibleBounds
             assertEquals(coverBounds.width(), restored.width())

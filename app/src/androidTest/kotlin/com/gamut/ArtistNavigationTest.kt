@@ -16,7 +16,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ArtistNavigationTest {
-    @Test fun rightThumbRailSelectsArtistSections() {
+    @Test fun rightThumbRailScrollsToArtistSectionsOnOnePage() {
         val art = "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e029b9b36b0e22870b9f542d937"
         val uri = "spotify:artist:4tZwfgrHOc3mvqYlEYSvVi"
         val album = SpotifyCard("spotify:album:4m2880jivSbbyEGAKfITCa", "Reference release", "Album", art, "album")
@@ -26,18 +26,23 @@ class ArtistNavigationTest {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> activity.setContent { SpotTheme { SpotArtistScreen(detail, hiltViewModel(), emptySet(), null, {}, {}) } } }
-            assertTrue(device.wait(Until.hasObject(By.text("Popular")), 10000))
+            assertTrue(device.wait(Until.hasObject(By.textContains("monthly listeners")), 10000))
             val overview = device.findObject(By.desc("Overview artist section")).visibleBounds
             val latest = device.findObject(By.desc("Latest artist section")).visibleBounds
             assertTrue(overview.centerX() > device.displayWidth * .8)
             assertTrue("Rail should occupy the middle of the screen", overview.top > device.displayHeight * .15)
             assertTrue("Rail should leave space below", latest.bottom < device.displayHeight * .9)
+            // The rail scrolls within one page: the header leaves the screen and the section arrives.
             device.swipe(overview.centerX(), overview.centerY(), latest.centerX(), latest.centerY(), 24)
             assertTrue(device.wait(Until.hasObject(By.text("Latest releases")), 5000))
+            assertTrue(device.wait(Until.gone(By.textContains("monthly listeners")), 5000))
+            device.findObject(By.desc("Songs artist section")).click()
+            assertTrue(device.wait(Until.hasObject(By.text("Popular")), 5000))
+            assertTrue(device.wait(Until.hasObject(By.desc("Songs artist section").selected(true)), 5000))
             device.findObject(By.desc("Albums artist section")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Albums and singles")), 5000))
             device.findObject(By.desc("Overview artist section")).click()
-            assertTrue(device.wait(Until.hasObject(By.text("Popular")), 5000))
+            assertTrue(device.wait(Until.hasObject(By.textContains("monthly listeners")), 5000))
             SystemClock.sleep(1200)
             device.executeShellCommand("screencap -p /sdcard/spot-ui-artist.png")
         }

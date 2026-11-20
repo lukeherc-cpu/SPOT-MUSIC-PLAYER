@@ -29,12 +29,11 @@ internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, b
     LaunchedEffect(active, expanded) {
         if (active >= 0 && !list.isScrollInProgress) list.animateScrollToItem((active - if (expanded) 2 else 1).coerceAtLeast(0))
     }
+    // In the square, a tap anywhere turns it back to the cover. Full screen, a tap on a timed line plays from there.
     Column(modifier.fillMaxSize().clip(RoundedCornerShape(if (expanded) 0.dp else 7.dp)).background(background)
-        .clickable(onClickLabel = "Return to cover art", onClick = onCover)
-        .semantics { contentDescription = "$title, tap to return to cover art" }) {
+        .then(if (expanded) Modifier else Modifier.clickable(onClickLabel = "Return to cover art", onClick = onCover).semantics { contentDescription = "$title, tap to return to cover art" })) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            SIcon(Icons.Outlined.Image, "Show cover art", size = 21.dp, onClick = onCover)
             SIcon(if (expanded) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull, if (expanded) "Minimize text" else "Expand $title", size = 21.dp, onClick = onExpand)
         }
         if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .7f), modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp))
@@ -45,8 +44,7 @@ internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, b
                     Text(line.text.ifBlank { "♪" }, fontSize = if (expanded) 30.sp else 22.sp, lineHeight = if (expanded) 41.sp else 31.sp, fontWeight = FontWeight.Bold,
                         color = if (!words.isSynced || index == active) Color.White else Color.White.copy(alpha = if (index < active) .78f else .4f),
                         modifier = Modifier.fillMaxWidth()
-                            .then(if (words.isSynced) Modifier.clickable(onClickLabel = "Play from this line") { onSeek(line.timestampMs) }
-                                else Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {})
+                            .then(if (expanded && words.isSynced) Modifier.clickable(onClickLabel = "Play from this line") { onSeek(line.timestampMs) } else Modifier)
                             .padding(vertical = 3.dp))
                 }
                 item { Spacer(Modifier.height(if (expanded) 140.dp else 50.dp)) }

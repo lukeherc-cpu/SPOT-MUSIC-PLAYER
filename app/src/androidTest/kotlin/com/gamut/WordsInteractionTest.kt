@@ -21,7 +21,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class WordsInteractionTest {
-    @Test fun tappingTimedTextSeeksToThatLineInBothSizesAndKeepsTheText() {
+    @Test fun tappingTheSquareFlipsBackAndFullScreenLinesSeek() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val seeks = mutableListOf<Long>()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -39,18 +39,23 @@ class WordsInteractionTest {
                 }
             } }
             assertTrue(device.wait(Until.hasObject(By.textContains("Second timed line")), 5000))
+            assertFalse(device.hasObject(By.desc("Show cover art")))
             device.findObject(By.textContains("Second timed line")).click()
-            device.waitForIdle()
-            assertEquals(listOf(1000L), seeks)
-            assertFalse(device.hasObject(By.text("Cover fixture")))
+            assertTrue(device.wait(Until.hasObject(By.text("Cover fixture")), 5000))
+            assertEquals(emptyList<Long>(), seeks)
+            device.findObject(By.text("Cover fixture")).click()
+            assertTrue(device.wait(Until.hasObject(By.desc("Expand Lyrics")), 5000))
             device.findObject(By.desc("Expand Lyrics")).click()
             assertTrue(device.wait(Until.hasObject(By.desc("Minimize text")), 5000))
             device.findObject(By.textContains("First timed line")).click()
             device.waitForIdle()
-            assertEquals(listOf(1000L, 0L), seeks)
+            assertEquals(listOf(0L), seeks)
             assertTrue(device.hasObject(By.desc("Minimize text")))
-            device.findObject(By.desc("Show cover art")).click()
+            device.findObject(By.desc("Minimize text")).click()
+            assertTrue(device.wait(Until.hasObject(By.desc("Lyrics, tap to return to cover art")), 5000))
+            device.findObject(By.desc("Lyrics, tap to return to cover art")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Cover fixture")), 5000))
         }
     }
+}
 }

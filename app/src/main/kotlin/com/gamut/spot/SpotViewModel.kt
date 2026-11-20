@@ -49,7 +49,11 @@ class SpotViewModel @Inject constructor(
     private val youtube: YoutubeMusicSearchSource,
     private val artistFollows: FollowRepository,
     val podcastSubtitles: com.gamut.speech.PodcastSubtitles,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+    private val avatars: com.gamut.account.AvatarRepository,
 ) : ViewModel() {
+    // Plays per song, kept on this device. Used for "Your most listened to" on artist pages.
+    private val plays by lazy { appContext.getSharedPreferences("cadence_play_counts", android.content.Context.MODE_PRIVATE) }
     val favorites = library.observeFavorites().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val playlists = library.observePlaylists().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val playlistTracks = playlists.flatMapLatest { list ->
@@ -95,7 +99,7 @@ class SpotViewModel @Inject constructor(
                 when (state) {
                     is PlaybackState.Playing -> {
                         if (_opening.value?.isrc == state.track.isrc) _opening.value = null
-                        if (lastId != state.track.isrc) { recentRepository.record(state.track); lastId = state.track.isrc }
+                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); lastId = state.track.isrc }
                     }
                     is PlaybackState.Error -> { _opening.value = null; _messages.tryEmit(state.message) }
                     else -> Unit
@@ -103,6 +107,26 @@ class SpotViewModel @Inject constructor(
             }
         }
         viewModelScope.launch { delay(400); player.warmUp() }
+        viewModelScope.launch { avatars.model(null).collect { SpotProfile.photo = it } }
+    }
+    private fun countPlay(track: Track) {
+        if (track.source == TrackSource.PODCAST) return
+        val all = plays.all
+        val editor = plays.edit().putInt(track.isrc, ((all[track.isrc] as? Int) ?: 0) + 1)
+        // Keep the store small: drop the least played songs past 2,000 entries.
+        if (all.size > 2000) all.entries.sortedBy { (it.value as? Int) ?: 0 }.take(all.size - 2000).forEach { editor.remove(it.key) }
+        editor.apply()
+    }
+    fun setProfilePhoto(uri: android.net.Uri) {
+        viewModelScope.launch { avatars.set(null, appContext.contentResolver, uri).onFailure { _messages.tryEmit("Could not use that photo. Try another image.") } }
+    }
+    fun removeProfilePhoto() { viewModelScope.launch { avatars.remove(null) } }
+    suspend fun mostPlayedBy(artist: String, limit: Int = 5): List<Track> = withContext(Dispatchers.IO) {
+        val needle = artist.trim().lowercase()
+        if (needle.isEmpty()) return@withContext emptyList()
+        val counts = plays.all.mapNotNull { (k, v) -> (v as? Int)?.let { k to it } }.sortedByDescending { it.second }.take(400)
+        val tracks = counts.map { it.first }.chunked(400).flatMap { trackDao.getByIsrcs(it) }.map { it.toDomain() }.associateBy { it.isrc }
+        counts.mapNotNull { tracks[it.first] }.filter { t -> t.artist.split(',').any { it.trim().lowercase() == needle } }.take(limit)
     }
     fun refreshHomeIfStale() {
         if (System.currentTimeMillis() - homeRefreshedAt > 30 * 60_000L) refreshHome()

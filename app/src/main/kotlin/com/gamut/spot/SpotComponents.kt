@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.*
@@ -32,7 +33,15 @@ import coil.compose.SubcomposeAsyncImage
 import com.gamut.core.model.Track
 import com.gamut.core.network.SpotifyCard
 
-internal val Green = Color(0xFF1ED760)
+// The accent is purple by default. Listeners can pick any hue in Settings; it is kept on this device.
+internal object SpotAccent {
+    const val DEFAULT_HUE = 268f
+    var hue by mutableFloatStateOf(DEFAULT_HUE)
+    private fun store(context: android.content.Context) = context.getSharedPreferences("cadence_ui", android.content.Context.MODE_PRIVATE)
+    fun load(context: android.content.Context) { hue = store(context).getFloat("accent_hue", DEFAULT_HUE) }
+    fun save(context: android.content.Context, value: Float) { hue = value; store(context).edit().putFloat("accent_hue", value).apply() }
+}
+internal val Green: Color get() = Color.hsl(SpotAccent.hue, .70f, .72f)
 internal val Black = Color(0xFF121212)
 internal val Card = Color(0xFF282828)
 internal val Muted = Color(0xFFB3B3B3)
@@ -43,6 +52,8 @@ internal val LocalQueueTrack = staticCompositionLocalOf<(Track) -> Unit> { {} }
 
 @Composable
 internal fun SpotTheme(content: @Composable () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    remember(context) { SpotAccent.load(context) }
     val fonts = FontFamily(Font(com.gamut.core.designsystem.R.font.inter_regular), Font(com.gamut.core.designsystem.R.font.inter_medium, FontWeight.Medium), Font(com.gamut.core.designsystem.R.font.inter_semibold, FontWeight.Bold))
     val base = Typography()
     val typography = base.copy(
@@ -66,10 +77,32 @@ internal fun SIcon(icon: ImageVector, description: String?, tint: Color = Color.
     IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) { Icon(icon, description, tint = tint, modifier = Modifier.size(size)) }
 }
 
+// Save button with a quick bounce whenever the saved state changes, wherever the song is saved from.
+@Composable
+internal fun SaveToggle(saved: Boolean, description: String, idleTint: Color = Color.White, size: Dp = 24.dp, onClick: () -> Unit) {
+    val scale = remember { androidx.compose.animation.core.Animatable(1f) }
+    var seen by remember { mutableStateOf(saved) }
+    LaunchedEffect(saved) {
+        if (seen == saved) return@LaunchedEffect
+        seen = saved
+        scale.snapTo(.6f)
+        scale.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = .32f, stiffness = 520f))
+    }
+    IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
+        Icon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, description, tint = if (saved) Green else idleTint,
+            modifier = Modifier.size(size).graphicsLayer { scaleX = scale.value; scaleY = scale.value })
+    }
+}
+
+// The listener's profile photo, set in Settings and kept on this device.
+internal object SpotProfile { var photo by mutableStateOf<Any?>(null) }
+
 @Composable
 internal fun SAvatar(onClick: () -> Unit) {
-    Box(Modifier.size(34.dp).clip(CircleShape).background(Color(0xFFD694B1)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(Icons.Filled.Person, "Profile and settings", tint = Color(0xFF25151E), modifier = Modifier.size(24.dp))
+    Box(Modifier.size(34.dp).clip(CircleShape).background(Green).clickable(onClick = onClick).semantics { contentDescription = "Profile and settings" }, contentAlignment = Alignment.Center) {
+        val photo = SpotProfile.photo
+        if (photo != null) coil.compose.AsyncImage(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else Icon(Icons.Filled.Person, null, tint = Color(0xFF1B1226), modifier = Modifier.size(24.dp))
     }
 }
 
@@ -135,7 +168,7 @@ internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = fal
                 Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { artistTap(track) })
             }
         }
-        SIcon(if (saved) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, if (saved) "Saved in playlists" else "Save song", tint = if (saved) Green else Muted, size = 22.dp, onClick = { save(track) })
+        SaveToggle(saved, if (saved) "Saved in playlists" else "Save song", idleTint = Muted, size = 22.dp, onClick = { save(track) })
         SIcon(Icons.Outlined.MoreVert, "Song options", tint = Muted, onClick = onMore)
     }
     }

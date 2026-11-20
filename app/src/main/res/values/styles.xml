@@ -4,7 +4,7 @@
 
     <style name="Theme.Gamut" parent="android:Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#1ED760</item>
+        <item name="android:colorAccent">#B486EA</item>
         <item name="android:windowBackground">@color/gamut_dark</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

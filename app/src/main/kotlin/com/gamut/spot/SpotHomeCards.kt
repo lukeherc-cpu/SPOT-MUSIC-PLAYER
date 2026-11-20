@@ -1,7 +1,5 @@
 package com.gamut.spot
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -14,6 +12,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,23 +92,47 @@ internal fun PodcastEpisodeCards(episodes: List<HomeEpisode>, vm: SpotViewModel)
     }
 }
 
+// Music videos play muted inside the card, in the app, instead of opening another site.
 @Composable
 internal fun MusicVideoRail(videos: List<YoutubeCandidate>) {
     if (videos.isEmpty()) return
-    val context = LocalContext.current
+    var playing by rememberSaveable { mutableStateOf<String?>(null) }
     SHeading("Music videos for you")
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(videos, key = { it.videoId }) { video ->
-            Column(Modifier.width(272.dp).clip(RoundedCornerShape(8.dp)).background(Card).clickable {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.videoId}")))
-            }) {
+            val on = playing == video.videoId
+            Column(Modifier.width(272.dp).clip(RoundedCornerShape(8.dp)).background(Card).clickable(onClickLabel = if (on) "Stop video" else "Play video muted") { playing = if (on) null else video.videoId }) {
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
-                    SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
-                    Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, null, tint = Color.Black) }
+                    if (on) MutedVideo(video.videoId, Modifier.fillMaxSize())
+                    else {
+                        SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
+                        Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, null, tint = Color.Black) }
+                    }
                 }
                 Text(video.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp))
-                Text("Watch on YouTube · ${video.channelName}", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
+                Text((if (on) "Playing muted · tap to stop · " else "Plays muted in Cadence · ") + video.channelName, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
             }
         }
     }
+}
+
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun MutedVideo(videoId: String, modifier: Modifier) {
+    val id = videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(11)
+    val origin = "https://www.youtube-nocookie.com"
+    val page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style></head><body><iframe src="$origin/embed/$id?autoplay=1&mute=1&playsinline=1&controls=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>"""
+    androidx.compose.ui.viewinterop.AndroidView(modifier = modifier, factory = { context ->
+        android.webkit.WebView(context).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            // Stay in the app: links out of the player (such as the video title) are ignored.
+            webViewClient = object : android.webkit.WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: android.webkit.WebView, request: android.webkit.WebResourceRequest) = request.isForMainFrame
+            }
+            loadDataWithBaseURL("$origin/", page, "text/html", "utf-8", null)
+        }
+    }, onRelease = { it.stopLoading(); it.loadUrl("about:blank"); it.destroy() })
 }
