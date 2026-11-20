@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile,stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {Catalog,decodeTrack,resource} from '../src/catalog.mjs';
+import {Catalog,decodeTrack,resource,artistInfo} from '../src/catalog.mjs';
 import {parseFeed} from '../src/podcasts.mjs';
 import {publicAddress} from '../src/public-network.mjs';
 import {Store} from '../src/store.mjs';
 import {Resolver,rewriteManifest} from '../src/resolver.mjs';
-import {recommendations,browse,albumForTrack,US,seedArtists} from '../src/discovery.mjs';
+import {recommendations,browse,albumForTrack,US,seedArtists,radio} from '../src/discovery.mjs';
 import {parseTranscript,cleanVersion,cleanLyricText,decoderInput} from '../src/subtitles.mjs';
 import {Readable} from 'node:stream';
 import {get} from 'node:http';
@@ -139,4 +139,27 @@ test('saved HLS manifests and segments play after restart without network',async
   const manifest=await (await restart.response(new Request(source.url))).text();
   const segment=manifest.split('\n').find(x=>x.startsWith('spot:'));
   assert.equal(await (await restart.response(new Request(segment))).text(),'media-bytes');
+});
+
+test('artist overview exposes stats, verification, latest release and related artists',()=>{
+  const img=[{url:'https://i.scdn.co/image/abc',width:300}];
+  const info=artistInfo({stats:{monthlyListeners:1234,followers:'99'},profile:{verified:true},discography:{latest:{uri:'spotify:album:4m2880jivSbbyEGAKfITCa',name:'New One',type:'SINGLE',date:{year:2026},coverArt:{sources:img}}},relatedContent:{relatedArtists:{items:[{uri:'spotify:artist:0TnOYISbd1XYRBk9myaseg',profile:{name:'Friend'},visuals:{avatarImage:{sources:img}}},{uri:'spotify:track:x',profile:{name:'Not an artist'}}]}}});
+  assert.deepEqual([info.monthlyListeners,info.followers,info.verified],[1234,99,true]);
+  assert.equal(info.latest.title,'New One');assert.equal(info.latest.subtitle,'Single · 2026');
+  assert.deepEqual(info.related.map(x=>x.title),['Friend']);assert.equal(info.related[0].artwork,'https://i.scdn.co/image/abc');
+  assert.deepEqual(artistInfo({}),{monthlyListeners:null,followers:null,verified:false,latest:null,related:[]});
+});
+test('radio mixes the seed artist with related artists and skips what is already queued',async()=>{
+  const t=(id,artist)=>({isrc:id,title:id,artist,source:'SPOTIFY'});
+  const catalog={
+    search:async q=>({tracks:[t('s1','Seed'),t('x','Other')],artists:[{uri:'spotify:artist:0TnOYISbd1XYRBk9myaseA',title:'Seed'}]}),
+    collection:async uri=>uri.endsWith('A')?{tracks:[t('s2','Seed'),t('s3','Seed'),t('queued','Seed')],artist:{related:[{uri:'spotify:artist:0TnOYISbd1XYRBk9myaseB',title:'Pal'}]}}:{tracks:[t('p1','Pal'),t('p2','Pal')]},
+  };
+  const result=await radio(catalog,{artist:'Seed, Guest',title:'Song',isrc:'seed-song'},['queued']);
+  assert.equal(result.title,'Song Radio');assert.equal(result.radio,true);
+  const ids=result.tracks.map(x=>x.isrc);
+  assert.ok(ids.includes('p1')&&ids.includes('s2'));assert.ok(!ids.includes('queued')&&!ids.includes('x'));
+  assert.equal(new Set(ids).size,ids.length);
+  assert.match(result.subtitle,/Pal/);
+  await assert.rejects(()=>radio({search:async()=>({tracks:[],artists:[]})},{artist:'Nobody'}),/Couldn't build a radio/);
 });

@@ -117,11 +117,11 @@ internal fun STrack(track: Track, playing: Boolean = false, saved: Boolean = fal
     val enqueue by rememberUpdatedState(LocalQueueTrack.current)
     val haptics = LocalHapticFeedback.current
     val swipe = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
-        if (value == SwipeToDismissBoxValue.EndToStart) { enqueue(track); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
+        if (value == SwipeToDismissBoxValue.StartToEnd) { enqueue(track); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
         false
     })
-    SwipeToDismissBox(state = swipe, enableDismissFromStartToEnd = false, backgroundContent = {
-        Box(Modifier.fillMaxSize().background(Green).padding(end = 24.dp), contentAlignment = Alignment.CenterEnd) { Icon(Icons.Outlined.PlaylistAdd, "Add to queue", tint = Color.Black) }
+    SwipeToDismissBox(state = swipe, enableDismissFromEndToStart = false, backgroundContent = {
+        Box(Modifier.fillMaxSize().background(Green).padding(start = 24.dp), contentAlignment = Alignment.CenterStart) { Icon(Icons.Outlined.PlaylistAdd, "Add to queue", tint = Color.Black) }
     }) {
     Row(Modifier.fillMaxWidth().background(Black).combinedClickable(onClick = onPlay, onLongClickLabel = "Song options", onLongClick = onMore)
         .semantics { customActions = listOf(CustomAccessibilityAction("Add to queue") { enqueue(track); true }) }
