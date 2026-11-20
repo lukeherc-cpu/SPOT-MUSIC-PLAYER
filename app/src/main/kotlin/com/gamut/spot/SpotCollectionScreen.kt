@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gamut.core.designsystem.rememberCoverPalette
 import com.gamut.core.model.Track
+import com.gamut.core.model.TrackArtist
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +54,13 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
                 SArt(detail.artwork, Modifier.size(228.dp).align(Alignment.CenterHorizontally).padding(4.dp), liked = detail.key == "liked", circle = detail.key.startsWith("spotify:artist:"))
                 Text(detail.title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 10.dp))
                 if (detail.description.isNotBlank()) Text(detail.description, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                Text(detail.subtitle, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                // On an album, the artist name under the title opens that artist.
+                val albumArtist = remember(detail.key, detail.subtitle, detail.tracks) {
+                    if (!detail.key.startsWith("spotify:album:") && !detail.key.startsWith("album-for:")) null
+                    else detail.tracks.flatMap { it.artists }.firstOrNull { detail.subtitle.startsWith(it.name, ignoreCase = true) }
+                        ?: detail.subtitle.substringBefore(" · ").substringBefore(", ").trim().takeIf { it.isNotBlank() }?.let { TrackArtist(it) }
+                }
+                Text(detail.subtitle, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).then(if (albumArtist != null) Modifier.clickable { vm.openArtist(albumArtist) } else Modifier))
                 val length = detail.tracks.sumOf { it.durationMs } / 60000
                 Text(if (detail.podcast != null) "${detail.tracks.size} episodes" else "${detail.tracks.size} songs${if (length > 0) " · ${length / 60} hr ${length % 60} min" else ""}", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
