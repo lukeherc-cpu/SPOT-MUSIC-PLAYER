@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Native Kotlin adaptation of the public catalogue protocol in Aran404/SpotAPI (GPL-3.0).
  * Baseline: 13cb48ddc221aa6f7d2bf1b8229bc4b158247916.
- * See docs/SPOTAPI_INTEGRATION.md. No Spotify audio, user account cookies or private account APIs.
+ * See docs/SPOTAPI_INTEGRATION.md. No Spotify audio. When the listener signs in to Spotify inside Cadence,
+ * their own session cookie (kept encrypted on the device) is used only to read their playlists and mixes.
  */
 package com.gamut.core.network
 
@@ -30,6 +31,11 @@ interface SpotifyCatalog {
     suspend fun search(query: String): List<Track>
     suspend fun searchAll(query: String): SpotifySearch = SpotifySearch(tracks = search(query))
     suspend fun collection(uri: String): SpotifyCollection = error("Spotify collections are unavailable")
+    /** Signs the catalog in with the listener's own Spotify web session cookie, or signs it out with null. */
+    fun setAccount(cookie: String?) {}
+    suspend fun accountName(): String? = null
+    suspend fun libraryPlaylists(): List<SpotifyCard> = emptyList()
+    suspend fun personalMixes(): List<SpotifyCard> = emptyList()
 }
 
 data class SpotifyCard(val uri: String, val title: String, val subtitle: String, val artwork: String?, val type: String)
@@ -45,11 +51,18 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
     private val client = OkHttpClient.Builder().protocols(listOf(Protocol.HTTP_1_1)).callTimeout(25, TimeUnit.SECONDS)
         .followRedirects(false).cookieJar(object : CookieJar {
             override fun saveFromResponse(url: HttpUrl, values: List<Cookie>) { synchronized(cookies) { cookies[url.host] = (cookies[url.host].orEmpty() + values).associateBy { it.name + "|" + it.domain + "|" + it.path }.values.toList() } }
-            override fun loadForRequest(url: HttpUrl): List<Cookie> = synchronized(cookies) { cookies.values.flatten().filter { it.matches(url) && it.expiresAt > nowMillis() } }
+            override fun loadForRequest(url: HttpUrl): List<Cookie> = synchronized(cookies) { cookies.values.flatten().filter { it.matches(url) && it.expiresAt > nowMillis() && it.name != "sp_dc" } } + accountCookie(url)
         }).build()
     private val gate = Mutex()
     private var session: Session? = null
-    private class Session(val access: String, val clientToken: String, val version: String, val hash: String, val expires: Long)
+    @Volatile private var account: String? = null
+    private class Session(val access: String, val clientToken: String, val version: String, val hash: String, val expires: Long, val account: String? = null, val anonymous: Boolean = true)
+    private fun accountCookie(url: HttpUrl): List<Cookie> {
+        val value = account ?: return emptyList()
+        if (!url.isHttps || !(url.host == "spotify.com" || url.host.endsWith(".spotify.com"))) return emptyList()
+        return listOf(Cookie.Builder().name("sp_dc").value(value).domain("spotify.com").path("/").secure().httpOnly().build())
+    }
+    private fun activeSession(): Session? = session?.takeIf { it.expires > nowMillis() + 60_000 && it.account == account }
     private val cache = mutableMapOf<String, Pair<Long, SpotifySearch>>()
     private val hashes = mutableMapOf<String, String>()
     private var bundleUrls = emptyList<String>()
@@ -128,7 +141,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         gate.lock()
         try {
             repeat(2) { attempt ->
-                val active = session?.takeIf { it.expires > nowMillis() + 60_000 } ?: authorize().also { session = it }
+                val active = activeSession() ?: authorize().also { session = it }
                 val hash = if (operation == "searchDesktop") active.hash else resolveHash(operation)
                 val payload = buildJsonObject {
                     put("operationName", operation); put("variables", variables)
@@ -145,6 +158,82 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
             changed()
         } finally { gate.unlock() }
     }
+    override fun setAccount(cookie: String?) {
+        account = cookie?.trim()?.takeIf { it.isNotEmpty() && it.length < 4096 && it.none { c -> c.isWhitespace() || c == ';' } }
+        synchronized(cache) { cache.clear() }
+    }
+
+    /** Spotify's Web API with the signed-in web session. Only for the listener's own library. */
+    private suspend fun webApi(path: String, params: List<Pair<String, String>> = emptyList()): JsonObject {
+        if (account == null) throw CatalogException(401, "Sign in to Spotify to see your library.")
+        gate.lock()
+        try {
+            repeat(2) { attempt ->
+                val active = activeSession() ?: authorize().also { session = it }
+                if (active.anonymous) throw CatalogException(401, "Your Spotify sign-in has expired. Sign in again.")
+                try {
+                    return json("https://api.spotify.com$path", params = params, headers = mapOf(
+                        "Authorization" to "Bearer ${active.access}", "client-token" to active.clientToken,
+                        "app-platform" to "WebPlayer", "Origin" to "https://open.spotify.com", "Referer" to "https://open.spotify.com/"))
+                } catch (e: CatalogException) { if (attempt == 0 && e.code == 401) session = null else throw e }
+            }
+            changed()
+        } finally { gate.unlock() }
+    }
+
+    override suspend fun accountName(): String? = webApi("/v1/me").s("display_name").ifBlank { null }
+
+    override suspend fun libraryPlaylists(): List<SpotifyCard> {
+        val found = mutableListOf<SpotifyCard>()
+        var offset = 0
+        do {
+            val page = webApi("/v1/me/playlists", listOf("limit" to "50", "offset" to offset.toString()))
+            val items = page.a("items")
+            items.forEach { value ->
+                val item = value.obj(); val uri = item.s("uri")
+                if (uri.startsWith("spotify:playlist:") && item.s("name").isNotBlank()) {
+                    val count = (item.o("tracks").takeIf { it.isNotEmpty() } ?: item.o("items")).n("total")
+                    found += SpotifyCard(uri, item.s("name"), listOf("$count songs", item.o("owner").s("display_name")).filter { it.isNotBlank() }.joinToString(" · "), bestImage(item.a("images")), "playlist")
+                }
+            }
+            offset += items.size
+        } while (items.isNotEmpty() && offset < page.n("total") && offset < 2_000)
+        return found.distinctBy { it.uri }
+    }
+
+    override suspend fun personalMixes(): List<SpotifyCard> {
+        val found = linkedMapOf<String, SpotifyCard>()
+        // Mixes made for one listener: Daily Mix, artist, genre and mood mixes, On Repeat and Repeat Rewind
+        // use 37i9dQZF1E ids. Discover Weekly and Release Radar are matched by name.
+        fun keep(card: SpotifyCard) {
+            val id = card.uri.removePrefix("spotify:playlist:")
+            val personal = id.startsWith("37i9dQZF1E") || (id.startsWith("37i9dQZEVX") && (card.title.equals("Discover Weekly", true) || card.title.equals("Release Radar", true)))
+            if (card.uri.startsWith("spotify:playlist:") && personal) found.putIfAbsent(card.uri, card)
+        }
+        fun visit(value: JsonElement, depth: Int) {
+            if (depth > 12) return
+            when (value) {
+                is JsonObject -> {
+                    val uri = value.s("uri")
+                    if (uri.startsWith("spotify:playlist:") && value.s("name").isNotBlank())
+                        keep(SpotifyCard(uri, value.s("name"), value.s("description").replace(Regex("<[^>]*>"), "").ifBlank { "Made for you" }, bestImage(value.a("images")) ?: artwork(value), "playlist"))
+                    value.values.forEach { visit(it, depth + 1) }
+                }
+                is JsonArray -> value.forEach { visit(it, depth + 1) }
+                else -> Unit
+            }
+        }
+        for (path in listOf("/v1/views/made-for-x", "/v1/browse/categories/0JQ5DAt0tbjZptfcdMSKl3/playlists")) {
+            try { visit(webApi(path, listOf("limit" to "50", "content_limit" to "50", "locale" to "en")), 0) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        }
+        // Signed in, Spotify's search returns the listener's own mixes too.
+        for (query in listOf("Daily Mix", "Discover Weekly", "Release Radar", "On Repeat", "Repeat Rewind", "Mix")) {
+            try { searchAll(query).playlists.forEach(::keep) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        }
+        try { libraryPlaylists().forEach(::keep) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        return found.values.toList()
+    }
+
     private fun discoverHashes(source: String) {
         Regex("""["']([A-Za-z][A-Za-z0-9_]+)["']\s*,\s*["'](?:query|mutation)["']\s*,\s*["']([a-f0-9]{64})["']""").findAll(source).forEach { hashes[it.groupValues[1]] = it.groupValues[2] }
     }
@@ -164,6 +253,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
     }
 
     private suspend fun authorize(): Session {
+        val signedInAs = account
         val html = request("https://open.spotify.com/")
         val encoded = Regex("""<script\b[^>]*\bid=["']appServerConfig["'][^>]*>([^<]+)</script>""").find(html)?.groupValues?.get(1)
             ?: changed()
@@ -196,7 +286,7 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
         val token = json("https://clienttoken.spotify.com/v1/clienttoken", buildJsonObject { put("client_data", buildJsonObject {
             put("client_version", version); put("client_id", clientId); put("js_sdk_data", device)
         }) }).o("granted_token").s("token").ifBlank { changed() }
-        return Session(accessToken, token, version, searchHash, access.n("accessTokenExpirationTimestampMs"))
+        return Session(accessToken, token, version, searchHash, access.n("accessTokenExpirationTimestampMs"), signedInAs, signedInAs == null || access.b("isAnonymous") == true)
     }
     private fun queryHash(source: String) = Regex("""["']searchDesktop["']\s*,\s*["']query["']\s*,\s*["']([a-f0-9]{64})["']""").find(source)?.groupValues?.get(1)
     private fun bundleChunks(main: String): List<String> {
@@ -216,12 +306,12 @@ class SpotApiCatalog @Inject constructor() : SpotifyCatalog {
 
     private suspend fun request(url: String, body: JsonObject? = null, params: List<Pair<String, String>> = emptyList(), headers: Map<String, String> = emptyMap()): String {
         val target = url.toHttpUrl()
-        require(target.isHttps && target.host in setOf("open.spotify.com", "open.spotifycdn.com", "api-partner.spotify.com", "clienttoken.spotify.com"))
+        require(target.isHttps && target.host in setOf("open.spotify.com", "open.spotifycdn.com", "api-partner.spotify.com", "clienttoken.spotify.com", "api.spotify.com"))
         val builder = target.newBuilder()
         params.forEach { builder.addQueryParameter(it.first, it.second) }
         val req = Request.Builder().url(builder.build())
             .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            .header("Accept", if (body != null || target.encodedPath == "/api/token") "application/json" else "text/html, */*")
+            .header("Accept", if (body != null || target.encodedPath == "/api/token" || target.host == "api.spotify.com") "application/json" else "text/html, */*")
             .header("Accept-Language", "en")
         headers.forEach { (name, value) -> req.header(name, value) }
         if (body != null) req.post(body.toString().encodeToByteArray().toRequestBody("application/json".toMediaType()))
