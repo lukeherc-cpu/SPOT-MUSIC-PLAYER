@@ -1,5 +1,12 @@
 Desktop alpha for Windows, macOS and Linux.
 
+- Log in with Spotify on the Import page, then bring over some or all of your playlists and your mixes (Daily Mix, Discover Weekly, Release Radar and more). The sign-in session is kept encrypted on this computer.
+- Replace with clean version in the song menu for explicit songs. If no clean version turns up on its own, pick a YouTube upload from a list, with a preview.
+- Your mixes on Home: an artist mix for each favorite artist, plus Chill, Upbeat and Late Night mixes.
+- New episodes row and a blue dot on followed shows that have an episode you haven't opened.
+- Home shows your last mixes at once on launch while fresh ones load.
+- Search's Browse all has more genres, moods and podcast topics.
+- A playlist or album's big play button pauses what it started. Lyrics load as soon as a song starts.
 - New layout: Home, Search, Discover and Your Library tabs across the top, with search that opens in place on every page, and a profile tab for settings.
 - Light mode, plus a "match my computer" option.
 - Songs, albums, playlists, podcasts and artists each have their own cover shape and badge.

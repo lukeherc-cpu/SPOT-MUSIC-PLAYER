@@ -14,6 +14,14 @@ export class Resolver {
   constructor(directory,binary,runtime,runner=run,requester=publicRequest){this.request=requester;this.directory=directory;this.binary=binary;this.runtime=runtime;this.run=runner;this.cache=new Map();this.active=new Map();this.tokens=new Map();this.tail=Promise.resolve();}
   async load(){await mkdir(this.directory,{recursive:true});try{for(const entry of JSON.parse(await readFile(path.join(this.directory,'sources.json'),'utf8')))if(entry.expires>Date.now()||entry.file)this.cache.set(entry.id,entry);}catch(e){if(e.code!=='ENOENT')throw e;}}
   persist(){this.tail=this.tail.catch(()=>{}).then(async()=>{const file=path.join(this.directory,'sources.json');const entries=[...this.cache.values()];const values=[...entries.filter(x=>x.file),...entries.filter(x=>!x.file&&x.expires>Date.now()).slice(-500)];await writeFile(file+'.tmp',JSON.stringify(values),{mode:0o600});await rename(file+'.tmp',file);});return this.tail;}
+  /** YouTube uploads for a query, without resolving any streams. */
+  async search(query,count=10){
+    const q=String(query||'').replace(/\s+/g,' ').trim().slice(0,200);if(q.length<2)return[];
+    let stdout;try{({stdout}=await this.run(this.binary,['--flat-playlist','--no-warnings','--socket-timeout','15','--dump-single-json','--',`ytsearch${Math.max(1,Math.min(20,count))}:${q}`],{timeout:45000,maxBuffer:12e6,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}}));}
+    catch{throw Error('YouTube search is unavailable. Try again.');}
+    const data=JSON.parse(stdout);
+    return (Array.isArray(data.entries)?data.entries:[]).filter(x=>/^[A-Za-z0-9_-]{11}$/.test(x?.id)).map(x=>({videoId:x.id,title:String(x.title||'').slice(0,300),channel:String(x.channel||x.uploader||'').slice(0,200),durationMs:Math.max(0,Math.round((Number(x.duration)||0)*1000)),views:Number(x.view_count)||0}));
+  }
   async resolve(track,force=false,codec='auto'){
     const saved=this.cache.get(track.isrc);
     if(saved?.file){try{await stat(path.join(this.directory,saved.file));return this.token(saved);}catch{this.cache.delete(track.isrc);}}

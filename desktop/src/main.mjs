@@ -1,12 +1,13 @@
-import {app,BrowserWindow,ipcMain,protocol,nativeTheme,net} from 'electron';
+import {app,BrowserWindow,ipcMain,protocol,nativeTheme,net,session,safeStorage} from 'electron';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile,rename,rm} from 'node:fs/promises';
 import {Catalog,resource} from './catalog.mjs';
 import {Store,cleanTrack} from './store.mjs';
 import {Resolver} from './resolver.mjs';
-import {browse,recommendations,albumForTrack,radio} from './discovery.mjs';
+import {browse,recommendations,albumForTrack,radio,categories} from './discovery.mjs';
+import {findClean} from './clean.mjs';
 import {searchPodcasts,episodes} from './podcasts.mjs';
 import {ArtworkCache} from './artwork.mjs';
 import {SubtitleEngine,lyrics} from './subtitles.mjs';
@@ -22,10 +23,73 @@ let win,store,resolver,subtitles;const catalog=new Catalog();
 const string=(value,max=300)=>{if(typeof value!=='string'||value.length>max)throw Error('Invalid request.');return value;};
 const show=value=>{if(!value||typeof value!=='object')throw Error('Invalid podcast.');return{id:string(String(value.id||value.feedUrl),4000),title:string(value.title),author:string(value.author||''),feedUrl:string(value.feedUrl,4000),artwork:typeof value.artwork==='string'?value.artwork:null};};
 let homeCache=null,homeAt=0,homeNonce=0,homeKey='';
+const homeFile=()=>path.join(app.getPath('userData'),'home.json');
 async function home(){
   const library=store.snapshot(),key=library.history.map(x=>x.track.isrc).join(',')+'|'+library.favorites.map(x=>x.isrc).join(',');
   if(homeCache&&key===homeKey&&Date.now()-homeAt<30*60000)return homeCache;
-  const value=await recommendations(catalog,library,Math.floor(Date.now()/1800000)+homeNonce);homeCache=value;homeAt=Date.now();homeKey=key;return value;
+  const value=await recommendations(catalog,library,Math.floor(Date.now()/1800000)+homeNonce);homeCache=value;homeAt=Date.now();homeKey=key;
+  // The last Home is saved so the next launch shows mixes and their artwork at once.
+  void writeFile(homeFile()+'.tmp',JSON.stringify(value),{mode:0o600}).then(()=>rename(homeFile()+'.tmp',homeFile())).catch(()=>{});
+  return value;
+}
+async function savedHome(){try{const value=JSON.parse(await readFile(homeFile(),'utf8'));return value&&Array.isArray(value.mixes)?value:null;}catch{return null;}}
+
+/* Spotify account: the web player's session cookie, encrypted with the system keychain where available. */
+const accountFile=()=>path.join(app.getPath('userData'),'spotify-account.bin');
+async function loadAccount(){
+  try{const data=await readFile(accountFile());const cookie=safeStorage.isEncryptionAvailable()?safeStorage.decryptString(data):null;if(cookie)catalog.setAccount(cookie);}catch{}
+}
+async function saveAccount(cookie){
+  catalog.setAccount(cookie);
+  if(!catalog.account)throw Error('Spotify did not finish signing in. Try again.');
+  if(safeStorage.isEncryptionAvailable()){const file=accountFile();await writeFile(file+'.tmp',safeStorage.encryptString(catalog.account),{mode:0o600});await rename(file+'.tmp',file);}
+}
+let signingIn=null;
+function signIn(){
+  if(signingIn)return signingIn;
+  signingIn=new Promise((resolve,reject)=>{
+    // A separate, in-memory session: nothing from this window reaches the app's own pages.
+    const partition=`spotify-login-${randomUUID()}`,login=session.fromPartition(partition,{cache:false});
+    login.setPermissionRequestHandler((_c,_p,callback)=>callback(false));
+    // Present as plain Chrome; some sign-in providers turn away embedded browsers.
+    login.setUserAgent(app.userAgentFallback.split(' ').filter(x=>!/^(Electron|Cadence|spot-music-desktop)\//i.test(x)).join(' '));
+    const child=new BrowserWindow({parent:win,modal:true,width:520,height:760,title:'Log in with Spotify',autoHideMenuBar:true,backgroundColor:'#ffffff',webPreferences:{partition,contextIsolation:true,nodeIntegration:false,sandbox:true}});
+    child.webContents.setWindowOpenHandler(({url})=>{if(url.startsWith('https://'))void child.loadURL(url);return{action:'deny'};});
+    child.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('https://'))event.preventDefault();});
+    let done=false;
+    const check=async()=>{
+      if(done)return;
+      const cookie=(await login.cookies.get({name:'sp_dc'})).find(x=>/(^|\.)spotify\.com$/.test(x.domain.replace(/^\./,'')))?.value;
+      if(!cookie)return;
+      done=true;
+      try{await saveAccount(cookie);resolve(true);}catch(e){reject(e);}
+      finally{await login.clearStorageData().catch(()=>{});if(!child.isDestroyed())child.close();}
+    };
+    child.webContents.on('did-navigate',()=>void check());child.webContents.on('did-navigate-in-page',()=>void check());child.webContents.on('did-finish-load',()=>void check());
+    child.on('closed',()=>{if(!done){done=true;void login.clearStorageData().catch(()=>{});resolve(false);}});
+    void child.loadURL('https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F');
+  }).finally(()=>{signingIn=null;});
+  return signingIn;
+}
+const settled=promise=>promise.then(value=>({value}),error=>({error:error.message||'Spotify did not respond.'}));
+async function spotifyLibrary(){
+  // Each part loads on its own, so one failing source never hides the others.
+  const [name,playlists,mixes]=await Promise.all([catalog.accountName().catch(()=>null),settled(catalog.libraryPlaylists()),settled(catalog.personalMixes())]);
+  const found=(playlists.value||[]).length+(mixes.value||[]).length,failure=playlists.error||mixes.error;
+  const expired=/sign/i.test(failure||'')||/\(401\)/.test(failure||'');
+  return{signedIn:true,name,playlists:playlists.value||[],mixes:mixes.value||[],error:found?null:expired?'Your Spotify sign-in has expired. Sign in again.':failure?`Couldn't load your Spotify library. ${failure}`:"Spotify didn't return any playlists or mixes for this account."};
+}
+let episodeCache=new Map();
+async function newEpisodes(){
+  const library=store.snapshot(),seen=library.seen||{},cutoff=Date.now()-14*86400000;
+  const found=await Promise.all(library.shows.slice(0,15).map(async show=>{
+    try{
+      let hit=episodeCache.get(show.feedUrl);if(!hit||Date.now()-hit.at>30*60000){hit={at:Date.now(),tracks:await episodes(show)};episodeCache.set(show.feedUrl,hit);}
+      const latest=hit.tracks.map(t=>({t,at:Date.parse(t.published)||0})).sort((a,b)=>b.at-a.at)[0];
+      return latest&&latest.at>cutoff&&latest.at>(seen[show.feedUrl]||0)?{show,episode:latest.t,publishedAt:latest.at}:null;
+    }catch{return null;}
+  }));
+  return found.filter(Boolean).sort((a,b)=>b.publishedAt-a.publishedAt);
 }
 async function dispatch(command,value){
   switch(command){
@@ -41,8 +105,20 @@ async function dispatch(command,value){
       found.tracks=await withCleanVersion(catalog,found.tracks||[]);
       return{...found,shows,top:topResult(q,{...found,shows}),podcastNotice:podcasts.status==='rejected'?'Podcast directory is unavailable. Try again.':null};}
     case'home':if(value===true){homeAt=0;homeNonce++;}return home();
+    case'home-saved':return homeCache||savedHome();
+    case'new-episodes':return newEpisodes();
+    case'mark-seen':return store.markSeen(string(value,4000));
+    case'spotify-account':return{signedIn:Boolean(catalog.account)};
+    case'spotify-sign-in':return{signedIn:await signIn()};
+    case'spotify-sign-out':catalog.setAccount(null);await rm(accountFile(),{force:true});return{signedIn:false};
+    case'spotify-library':if(!catalog.account)return{signedIn:false};return spotifyLibrary();
+    case'clean-version':{const track=cleanTrack(value);if(track.source==='PODCAST')throw Error('Choose a song.');return findClean(catalog,q=>resolver.search(q,10),track);}
+    case'replace-track':{if(!value||typeof value!=='object')throw Error('Invalid request.');return store.replace(string(value.old,160),value.track);}
     case'licenses':{const dir=app.isPackaged?path.join(process.resourcesPath,'licenses'):path.resolve(here,'../../docs/licenses');const agpl=app.isPackaged?path.join(dir,'Cadence-AGPL-3.0.txt'):path.resolve(here,'../../LICENSE');return (await readFile(agpl,'utf8'))+'\n\nSPOTAPI\n'+(await readFile(path.join(dir,'SpotAPI-GPL-3.0.txt'),'utf8'));}
-    case'browse':return value==='Podcasts'?{title:'Podcasts',subtitle:'Find your next favorite show',shows:await searchPodcasts('popular')}:browse(catalog,string(value));
+    case'browse':{const name=string(value),topic=categories.find(x=>x[0]===name&&x[4]==='podcast');
+      if(name==='Podcasts')return{title:'Podcasts',subtitle:'Find your next favorite show',shows:await searchPodcasts('popular')};
+      if(topic)return{title:name,subtitle:`Shows about ${topic[2]}`,shows:await searchPodcasts(topic[2])};
+      return browse(catalog,name);}
     case'collection':return catalog.collection(resource(string(value,500)));
     case'album':return albumForTrack(catalog,cleanTrack(value));
     case'radio':{if(!value||typeof value!=='object')throw Error('Invalid radio request.');const seed={artist:string(value.artist,250),title:typeof value.title==='string'?value.title.slice(0,300):'',isrc:typeof value.isrc==='string'?value.isrc.slice(0,160):'',uri:/^spotify:artist:[A-Za-z0-9]{22}$/.test(value.uri)?value.uri:'',albumArtUrl:typeof value.albumArtUrl==='string'&&value.albumArtUrl.startsWith('https://')?value.albumArtUrl.slice(0,4000):null};const exclude=Array.isArray(value.exclude)?value.exclude.slice(0,300).filter(x=>typeof x==='string'&&x.length<=160):[];return radio(catalog,seed,exclude);}
@@ -77,7 +153,7 @@ function createWindow(){
 }
 app.whenReady().then(async()=>{
   nativeTheme.themeSource='system';
-  store=new Store(app.getPath('userData'));await store.load();
+  store=new Store(app.getPath('userData'));await store.load();await loadAccount();
   const resources=app.isPackaged?process.resourcesPath:path.resolve(here,'../resources');
   resolver=new Resolver(path.join(app.getPath('userData'),'audio'),path.join(resources,'resolver',process.platform==='win32'?'yt-dlp.exe':'yt-dlp'),process.execPath);await resolver.load();
   subtitles=new SubtitleEngine(path.join(app.getPath('userData'),'subtitles'),path.join(resources,'speech'),async track=>{
