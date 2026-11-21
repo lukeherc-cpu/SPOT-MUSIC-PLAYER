@@ -18,6 +18,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
@@ -99,6 +101,8 @@ class AndroidYtDlpEngine @Inject constructor(
             ?: emptyList()
     }
 
+    private val searchLock = Mutex()
+
     override suspend fun searchBroad(query: String): List<YoutubeCandidate> = withContext(Dispatchers.IO) {
         ensureReady()
         val request = YoutubeDLRequest("ytsearch8:$query")
@@ -107,7 +111,11 @@ class AndroidYtDlpEngine @Inject constructor(
             .addOption("--skip-download")
             .addOption("--no-warnings")
             .addOption("--extractor-args", CLIENT_ARGS)
-        val output = runCatching { YoutubeDL.getInstance().execute(request).out }.getOrNull() ?: return@withContext emptyList()
+        // Several yt-dlp runs at once on the shared instance fail silently, so searches take turns, with one retry.
+        val output = searchLock.withLock {
+            runCatching { YoutubeDL.getInstance().execute(request).out }.getOrNull()?.takeIf { it.isNotBlank() }
+                ?: runCatching { YoutubeDL.getInstance().execute(request).out }.getOrNull()
+        } ?: return@withContext emptyList()
         runCatching { json.decodeFromString<SearchResultJson>(output) }
             .getOrNull()
             ?.entries
