@@ -44,7 +44,7 @@ export class CleanVerifier{
   exe(name){return path.join(this.speech,name+(process.platform==='win32'?'.exe':''));}
   async download(target,dir){
     const out=path.join(dir,'a.%(ext)s');
-    await this.run(this.ytdlp,['--no-playlist','--no-warnings','--socket-timeout','15','--js-runtimes',`node:${this.runtime}`,'--extractor-args','youtube:player_client=visionos',
+    await this.run(this.ytdlp,['--no-playlist','--no-warnings','--socket-timeout','15','--js-runtimes',`node:${this.runtime}`,'--extractor-args',`youtube:player_client=${process.env.CADENCE_YT_CLIENTS||'visionos'}`,
       '-f','bestaudio[ext=m4a]/bestaudio/best','--max-filesize','40M','-o',out,'--',target],{timeout:120000,maxBuffer:8e6,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}});
     const file=(await readdir(dir)).find(x=>x.startsWith('a.')&&!x.endsWith('.part'));
     if(!file)throw Error('Audio download failed.');
