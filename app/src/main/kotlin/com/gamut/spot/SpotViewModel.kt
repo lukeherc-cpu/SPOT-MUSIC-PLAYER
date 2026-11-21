@@ -584,12 +584,18 @@ class SpotViewModel @Inject constructor(
         _cleanChoices.value = CleanChoices(song, collectionKey, listened = outcome?.checked?.size ?: 0, swore = explicit.size, notes = outcome?.checked.orEmpty(), controlVideoId = outcome?.controlVideoId)
         val artist = song.artist.substringBefore(',').trim()
         val base = song.title.substringBefore(" (").substringBefore(" - ")
-        val found = coroutineScope {
-            listOf("$artist $base clean", "$artist $base clean version", "$artist $base radio edit", "$base clean").map { q ->
-                async { try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } }
-            }.awaitAll().flatten()
-        }.filter { isValidYoutubeVideoId(it.videoId) && it.videoId !in explicit }.distinctBy { it.videoId }
-            .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { CleanMatch.tokens(it.title).containsAll(CleanMatch.tokens(base)) }.thenByDescending { it.viewCount })
+        // One search at a time, like the Search tab, widening until enough uploads turn up.
+        val results = mutableListOf<YoutubeCandidate>()
+        for (q in listOf("$artist $base clean", "$artist $base radio edit", "$artist $base", "$base clean")) {
+            results += try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+            if (results.distinctBy { it.videoId }.size >= 12) break
+        }
+        // YouTube Music songs without the explicit badge are the label's clean masters.
+        val musicResults = listOf("$base $artist clean", "$base $artist").flatMap { q -> try { YoutubeMusicSongs.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } }
+            .filter { !it.explicit && CleanMatch.tokens(it.title).containsAll(CleanMatch.tokens(base)) }
+            .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = false, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
+        val found = (musicResults + results).filter { isValidYoutubeVideoId(it.videoId) && it.videoId !in explicit }.distinctBy { it.videoId }
+            .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { it.isMusicCatalog }.thenByDescending { CleanMatch.tokens(it.title).containsAll(CleanMatch.tokens(base)) }.thenByDescending { it.viewCount })
             .take(15)
         _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(videos = found, loading = false) else it }
     }
