@@ -158,28 +158,31 @@ class CleanVerifier @Inject constructor(
             file
         } finally { connection.disconnect() }
     }
-    private suspend fun transcribe(file: File, windows: List<CleanWindow>): List<String> = windows.map { w ->
+    private suspend fun transcribe(file: File, windows: List<CleanWindow>, onWindow: (Int) -> Unit = {}): List<String> = windows.mapIndexed { i, w ->
+        onWindow(i)
         try {
             val pcm = com.gamut.speech.PodcastPcmDecoder.decode(file.absolutePath, w.startMs, w.endMs - w.startMs)
             if (pcm.size < 8_000) "" else speech.transcribeForCheck(pcm)
         } catch (e: CancellationException) { throw e } catch (_: Exception) { "" }
     }
-    private suspend fun control(song: Track, controlVideoId: String): Control = coroutineScope {
+    private suspend fun control(song: Track, controlVideoId: String, progress: (Float) -> Unit): Control = coroutineScope {
         val task = synchronized(controls) { controls.getOrPut(song.isrc) { async(Dispatchers.IO) {
             val lyric = try { LyricsRepository.fetchLyrics(song, song.durationMs) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
             val lines = (lyric as? LyricsState.Loaded)?.takeIf { it.isSynced }?.lines.orEmpty().map { Triple(it.timestampMs, it.endMs, it.text) }
             val windows = CleanWords.windows(lines, song.durationMs).ifEmpty { CleanWords.spread(song.durationMs) }
+            progress(.05f)
             val file = download(controlVideoId)
-            try { Control(windows, transcribe(file, windows)) } finally { file.delete() }
+            try { Control(windows, transcribe(file, windows) { progress((it + 1f) / (windows.size + 1)) }) } finally { file.delete() }
         } } }
         try { task.await() } catch (e: Exception) { synchronized(controls) { controls.remove(song.isrc) }; throw e }
     }
     /** Listens to [videoId] as a clean version of the explicit [song], whose own recording is [controlVideoId]. */
-    suspend fun check(song: Track, controlVideoId: String, videoId: String, durationMs: Long): CleanResult = try {
-        val control = control(song, controlVideoId)
+    suspend fun check(song: Track, controlVideoId: String, videoId: String, durationMs: Long, progress: (Boolean, Float) -> Unit = { _, _ -> }): CleanResult = try {
+        val control = control(song, controlVideoId) { progress(false, it) }
+        progress(true, .05f)
         val scale = if (durationMs > 0 && song.durationMs > 0 && kotlin.math.abs(durationMs - song.durationMs) < 30_000) durationMs.toDouble() / song.durationMs else 1.0
         val windows = control.windows.map { CleanWindow((it.startMs * scale).toLong(), (it.endMs * scale).toLong()) }
         val file = download(videoId)
-        try { CleanWords.judge(control.texts, transcribe(file, windows)) } finally { file.delete() }
+        try { CleanWords.judge(control.texts, transcribe(file, windows) { progress(true, (it + 1f) / (windows.size + 1)) }) } finally { file.delete(); progress(true, 1f) }
     } catch (e: CancellationException) { throw e } catch (_: Exception) { CleanResult(CleanVerdict.ERROR) }
 }

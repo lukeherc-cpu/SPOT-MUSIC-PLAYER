@@ -85,6 +85,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     var searchFilter by rememberSaveable { mutableStateOf("All") }
     var libraryGrid by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+    val cleanProgress by vm.cleanProgress.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -112,6 +113,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 Column(Modifier.background(Brush.verticalGradient(listOf(Black.copy(alpha = .94f), Color.Black)))) {
+                    cleanProgress?.let { progress -> CleanProgressBar(progress) }
                     if (track != null) SpotMiniPlayer(track, vm.player, isPlaying, opening != null, track.isrc in favoriteIds,
                         onOpen = { fullPlayer = true }, onSave = { vm.saveToLiked(track); saveTrack = track }, onBounds = { miniBounds = it })
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(62.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -365,7 +367,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 item { SHeading("No verified clean version") }
                 item { Text((if (choice.listened > 0) "Cadence listened to ${choice.listened} ${if (choice.listened == 1) "upload" else "uploads"} of ${choice.song.title}${if (choice.swore > 0) " and heard swearing in ${choice.swore}" else ""}, so none was added. " else "Cadence couldn't find a clean version of ${choice.song.title} on its own. ") +
                     "Pick an upload below and Cadence will listen to it for swearing before adding it. Tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
-                choice.checking?.let { title -> item { Text("Listening to $title for swearing…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) } }
+                choice.checking?.let { title -> item { cleanProgress?.let { CleanProgressBar(it) } ?: Text("Listening to $title for swearing…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) } }
                 if (choice.loading) item { DiscoverySkeleton() }
                 else if (choice.videos.isEmpty()) item { Text("No YouTube uploads found. Try the YouTube filter in Search.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 items(choice.videos, key = { "clean-${it.videoId}" }) { video ->
@@ -465,4 +467,18 @@ internal fun ErrorRow(message: String, retry: () -> Unit) {
 }
 @Composable internal fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, action: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 20.dp), style = MaterialTheme.typography.bodyLarge) }
+}
+
+/** Progress while Cadence finds a clean version and listens to it for swearing. */
+@Composable
+private fun CleanProgressBar(progress: CleanProgress) {
+    val shown by androidx.compose.animation.core.animateFloatAsState(progress.fraction.coerceIn(0f, 1f), label = "clean progress")
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF2A2A2A)).padding(horizontal = 12.dp, vertical = 10.dp).semantics(mergeDescendants = true) {}) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Making a clean version of ${progress.title}", style = MaterialTheme.typography.bodyMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text("${(shown * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = Muted)
+        }
+        Text(progress.step, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+        LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)), color = Green, trackColor = Color.White.copy(alpha = .15f))
+    }
 }

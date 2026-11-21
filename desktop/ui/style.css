@@ -390,3 +390,9 @@ h2 .explicit,strong .explicit{margin-left:6px;vertical-align:3px}
 .clean-choice{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)}.clean-choice>span{flex:1;min-width:0;display:flex;flex-direction:column}
 .clean-choice strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.clean-choice .cover.wide-thumb{width:96px;height:54px;aspect-ratio:16/9;flex:none}
 .muted.small{font-size:.85em}
+#clean-progress{position:fixed;right:24px;bottom:116px;width:340px;max-width:calc(100% - 48px);background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px 14px;box-shadow:0 5px 30px var(--shadow);z-index:60;display:grid;grid-template-columns:1fr auto;gap:2px 8px}
+#clean-progress strong{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#clean-progress span{font-size:13px;opacity:.7}
+#clean-progress small{grid-column:1/-1;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#clean-progress .bar{grid-column:1/-1;height:4px;border-radius:2px;background:var(--track);margin-top:6px;overflow:hidden}
+#clean-progress .bar i{display:block;height:100%;background:var(--accent);transition:width .4s ease}
