@@ -109,6 +109,12 @@ class PodcastSubtitles @Inject constructor(@ApplicationContext private val conte
             if (activeId == track.isrc) mutable.update { it.copy(working = false, error = "Couldn't generate subtitles for this audio. Playback can continue.") }
         }
     }
+    /** Transcribes a short 16 kHz mono clip in English for the clean-version check; returns the joined text. */
+    suspend fun transcribeForCheck(pcm: FloatArray): String {
+        val model = withContext(Dispatchers.IO) { model() }
+        val result = nativeLock.withLock { WhisperNative.load(); WhisperNative.transcribe(model.absolutePath, pcm, "en").toString(Charsets.UTF_8) }
+        return Json.parseToJsonElement(result).jsonArray.joinToString(" ") { it.jsonObject.getValue("text").jsonPrimitive.content.trim() }
+    }
     internal fun model(): File {
         val target = File(context.filesDir, "speech/ggml-tiny-q5_1.bin")
         if (target.isFile && target.length() == 32_152_673L) return target
