@@ -1,0 +1,43 @@
+name: Clean version check
+on:
+  pull_request:
+    paths:
+      - 'desktop/src/clean*.mjs'
+      - 'desktop/src/ytmusic.mjs'
+      - 'desktop/scripts/clean-eval.mjs'
+      - '.github/workflows/clean-eval.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run prepare:resolver
+      - run: python3 ../scripts/prepare_speech.py --desktop --platform linux --arch x64
+      - name: Measure clean versions before and after verification
+        env:
+          CADENCE_YT_CLIENTS: android_vr,tv_simply,web_embedded,mweb,visionos
+        run: node scripts/clean-eval.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clean-eval
+          path: desktop/clean-eval.json

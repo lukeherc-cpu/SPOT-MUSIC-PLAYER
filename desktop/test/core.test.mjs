@@ -255,3 +255,27 @@ test('search leads with a matching podcast for show names and with playlists for
   assert.equal(topResult('rap caviar',{tracks:[song('Caviar')],playlists:[card('RapCaviar','playlist')],top:[{kind:'playlist'}]}).kind,'playlist');
   assert.equal(topResult('blinding lights',{tracks:[song('Blinding Lights','The Weeknd')],playlists:[card('Chill Hits','playlist')],top:[{kind:'song'}]}).kind,'song');
 });
+test('clean versions are listened to before they are trusted',async()=>{
+  const {findClean,pickMusicClean}=await import('../src/clean.mjs');
+  const {swears,swearWindows,judge}=await import('../src/clean-verify.mjs');
+  const {parseSongs}=await import('../src/ytmusic.mjs');
+  assert.deepEqual(swears("Fuckin' with my shit, damn"),['fuckin','shit']);
+  assert.deepEqual(swears('Class assignment, shiitake'),[]);
+  const w=swearWindows([{startMs:10000,endMs:14000,text:'what the fuck'},{startMs:14000,endMs:18000,text:'nice day'},{startMs:15000,endMs:19000,text:'bitch please'}],200000);
+  assert.equal(w.length,1);assert.equal(w[0].startMs,8500);
+  assert.equal(judge(['what the fuck man'],['what the man']).verdict,'clean');
+  assert.equal(judge(['what the fuck man'],['what the fuck man']).verdict,'explicit');
+  assert.equal(judge(['what the fuck man here'],['']).verdict,'no-vocals');
+  assert.equal(judge(['nothing to see here'],['nothing to see here']).verdict,'unverified');
+  const song={isrc:'spotify:e',title:'Wraith',artist:'Chance the Rapper',durationMs:200000,isExplicit:true,source:'SPOTIFY'};
+  const runs=(t,artist,dur)=>({flexColumns:[{musicResponsiveListItemFlexColumnRenderer:{text:{runs:[{text:t}]}}},{musicResponsiveListItemFlexColumnRenderer:{text:{runs:[{text:artist,navigationEndpoint:{browseEndpoint:{browseEndpointContextSupportedConfigs:{browseEndpointContextMusicConfig:{pageType:'MUSIC_PAGE_TYPE_ARTIST'}}}}},{text:' • '},{text:dur}]}}}]});
+  const parsed=parseSongs({contents:[{musicResponsiveListItemRenderer:{...runs('Wraith','Chance the Rapper','3:20'),playlistItemData:{videoId:'EEEEEEEEEEE'},badges:[{musicInlineBadgeRenderer:{icon:{iconType:'MUSIC_EXPLICIT_BADGE'}}}]}},{musicResponsiveListItemRenderer:{...runs('Wraith','Chance the Rapper','3:19'),playlistItemData:{videoId:'CCCCCCCCCCC'}}}]});
+  assert.deepEqual(parsed.map(x=>[x.videoId,x.explicit,x.durationMs]),[['EEEEEEEEEEE',true,200000],['CCCCCCCCCCC',false,199000]]);
+  assert.deepEqual(pickMusicClean(song,parsed).map(x=>x.videoId),['CCCCCCCCCCC']);
+  const seen=[],verifier={check:async(s,id)=>{seen.push(id);return id==='CCCCCCCCCCC'?{verdict:'explicit',heard:['fuck']}:{verdict:'clean'};}};
+  const video={videoId:'VVVVVVVVVVV',title:'Chance the Rapper - Wraith (Clean)',channel:'x',durationMs:201000};
+  const found=await findClean({search:async()=>({tracks:[]})},async()=>[video],song,{musicSearch:async()=>parsed,verifier});
+  assert.deepEqual(seen,['CCCCCCCCCCC','VVVVVVVVVVV']);assert.equal(found.verified,true);assert.equal(found.track.youtubeVideoId,'VVVVVVVVVVV');
+  const none=await findClean({search:async()=>({tracks:[]})},async()=>[video],song,{musicSearch:async()=>parsed,verifier:{check:async()=>({verdict:'explicit',heard:['shit']})}});
+  assert.equal(none.track,undefined);assert.ok(none.choices.every(x=>x.videoId!=='CCCCCCCCCCC'&&x.videoId!=='VVVVVVVVVVV'));assert.equal(none.checked.length,2);
+});

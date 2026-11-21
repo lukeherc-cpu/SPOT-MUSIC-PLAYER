@@ -8,6 +8,8 @@ import {Store,cleanTrack} from './store.mjs';
 import {Resolver} from './resolver.mjs';
 import {browse,recommendations,albumForTrack,radio,categories} from './discovery.mjs';
 import {findClean} from './clean.mjs';
+import {CleanVerifier} from './clean-verify.mjs';
+import {searchMusicSongs} from './ytmusic.mjs';
 import {searchPodcasts,episodes} from './podcasts.mjs';
 import {ArtworkCache} from './artwork.mjs';
 import {SubtitleEngine,lyrics} from './subtitles.mjs';
@@ -19,7 +21,7 @@ protocol.registerSchemesAsPrivileged([{scheme:'spot',privileges:{standard:true,s
 // so libraries, likes and caches carry over.
 if(process.env.SPOT_TEST_DATA)app.setPath('userData',process.env.SPOT_TEST_DATA);else app.setPath('userData',path.join(app.getPath('appData'),'Spot Music'));
 const single=app.requestSingleInstanceLock();if(!single&&!process.env.SPOT_TEST_DATA)app.quit();
-let win,store,resolver,subtitles;const catalog=new Catalog();
+let win,store,resolver,subtitles,verifier;const catalog=new Catalog();
 const string=(value,max=300)=>{if(typeof value!=='string'||value.length>max)throw Error('Invalid request.');return value;};
 const show=value=>{if(!value||typeof value!=='object')throw Error('Invalid podcast.');return{id:string(String(value.id||value.feedUrl),4000),title:string(value.title),author:string(value.author||''),feedUrl:string(value.feedUrl,4000),artwork:typeof value.artwork==='string'?value.artwork:null};};
 let homeCache=null,homeAt=0,homeNonce=0,homeKey='';
@@ -112,7 +114,8 @@ async function dispatch(command,value){
     case'spotify-sign-in':return{signedIn:await signIn()};
     case'spotify-sign-out':catalog.setAccount(null);await rm(accountFile(),{force:true});return{signedIn:false};
     case'spotify-library':if(!catalog.account)return{signedIn:false};return spotifyLibrary();
-    case'clean-version':{const track=cleanTrack(value);if(track.source==='PODCAST')throw Error('Choose a song.');return findClean(catalog,q=>resolver.search(q,10),track);}
+    case'clean-version':{const track=cleanTrack(value);if(track.source==='PODCAST')throw Error('Choose a song.');return findClean(catalog,q=>resolver.search(q,10),track,{musicSearch:q=>searchMusicSongs(q),verifier});}
+    case'clean-check':{if(!value||typeof value!=='object')throw Error('Invalid request.');const track=cleanTrack(value.track);return verifier.check(track,string(value.videoId,20),Math.max(0,Number(value.durationMs)||0));}
     case'add-version':{if(!value||typeof value!=='object')throw Error('Invalid request.');return store.addVersion(string(value.old,160),value.track);}
     case'licenses':{const dir=app.isPackaged?path.join(process.resourcesPath,'licenses'):path.resolve(here,'../../docs/licenses');const agpl=app.isPackaged?path.join(dir,'Cadence-AGPL-3.0.txt'):path.resolve(here,'../../LICENSE');return (await readFile(agpl,'utf8'))+'\n\nSPOTAPI\n'+(await readFile(path.join(dir,'SpotAPI-GPL-3.0.txt'),'utf8'));}
     case'browse':{const name=string(value),topic=categories.find(x=>x[0]===name&&x[4]==='podcast');
@@ -156,6 +159,7 @@ app.whenReady().then(async()=>{
   store=new Store(app.getPath('userData'));await store.load();await loadAccount();
   const resources=app.isPackaged?process.resourcesPath:path.resolve(here,'../resources');
   resolver=new Resolver(path.join(app.getPath('userData'),'audio'),path.join(resources,'resolver',process.platform==='win32'?'yt-dlp.exe':'yt-dlp'),process.execPath);await resolver.load();
+  verifier=new CleanVerifier({ytdlp:resolver.binary,runtime:process.execPath,speech:path.join(resources,'speech'),lyricsFor:track=>lyrics(track)});
   subtitles=new SubtitleEngine(path.join(app.getPath('userData'),'subtitles'),path.join(resources,'speech'),async track=>{
     const saved=resolver.cache.get(track.isrc);return saved?.file?path.join(resolver.directory,saved.file):track.directAudioUrl;
   });
