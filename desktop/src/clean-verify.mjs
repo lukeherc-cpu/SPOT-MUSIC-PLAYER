@@ -93,6 +93,6 @@ export class CleanVerifier{
         const texts=await this.transcribe(await this.download(`https://www.youtube.com/watch?v=${videoId}`,dir),windows,dir);
         return{...judge(control.texts,texts),fromLyrics:control.fromLyrics,control:control.texts,candidate:texts};
       }finally{await rm(dir,{recursive:true,force:true});}
-    }catch(error){return{verdict:'error',message:String(error.message||error).slice(0,300)};}
+    }catch(error){return{verdict:'error',message:String(error.stderr||error.message||error).replace(/https?:\/\/\S+/g,'[url]').slice(-400)};}
   }
 }

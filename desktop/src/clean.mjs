@@ -56,7 +56,7 @@ export async function findClean(catalog,searchVideos,song,{musicSearch=null,veri
   for(const [i,candidate] of (verifier?candidates:[]).entries()){
     progress({step:i+1,of:candidates.length});
     const result=await verifier.check(song,candidate.videoId,candidate.durationMs);
-    checked.push({videoId:candidate.videoId,title:candidate.title,channel:candidate.channel,verdict:result.verdict,heard:result.heard||[]});
+    checked.push({videoId:candidate.videoId,title:candidate.title,channel:candidate.channel,verdict:result.verdict,heard:result.heard||[],...(result.message?{message:result.message}:{})});
     if(result.verdict==='clean')return{track:make(candidate),verified:true,checked};
   }
   const more=[...new Map([...candidates,...unique,...(await videos(`${baseTitle(song.title)} clean`))].map(x=>[x.videoId,x])).values()];

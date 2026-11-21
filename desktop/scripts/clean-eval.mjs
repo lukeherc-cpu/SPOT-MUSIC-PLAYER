@@ -44,9 +44,9 @@ async function evaluate([title,artist]){
   const song=found.find(t=>t.isExplicit===true&&core(t.title)===core(title))||null;
   if(!song)return{title,artist,skipped:'no explicit Spotify track'};
   const row={title:song.title,artist:song.artist};
-  try{const old=await legacy(song);row.oldHow=old?.how||'nothing found';row.old=old?(await verifier.check(song,old.videoId,old.durationMs)).verdict:'none';}catch(e){row.old='error';row.oldHow=String(e.message).slice(0,80);}
+  try{const old=await legacy(song);row.oldHow=old?.how||'nothing found';const r=old?await verifier.check(song,old.videoId,old.durationMs):{verdict:'none'};row.old=r.verdict;if(r.message)row.oldError=r.message;}catch(e){row.old='error';row.oldHow=String(e.message).slice(0,80);}
   try{const control=await verifier.control(song);row.controlHeard=control.texts.filter(t=>/\S/.test(t)).length;row.fromLyrics=control.fromLyrics;}catch{}
-  try{const now=await findClean(catalog,search,song,{musicSearch:q=>searchMusicSongs(q),verifier});row.now=now.verified?'clean':'none verified';row.nowChecked=(now.checked||[]).map(x=>`${x.verdict}`).join(', ');row.nowSource=now.track?.youtubeVideoId||'';}catch(e){row.now='error';row.nowChecked=String(e.message).slice(0,80);}
+  try{const now=await findClean(catalog,search,song,{musicSearch:q=>searchMusicSongs(q),verifier});row.now=now.verified?'clean':'none verified';row.nowChecked=(now.checked||[]).map(x=>`${x.verdict}`).join(', ');row.nowErrors=(now.checked||[]).map(x=>x.message).filter(Boolean).slice(0,1);row.nowSource=now.track?.youtubeVideoId||'';}catch(e){row.now='error';row.nowChecked=String(e.message).slice(0,80);}
   return row;
 }
 for(let i=0;i<SONGS.length;i+=3)rows.push(...await Promise.all(SONGS.slice(i,i+3).map(s=>evaluate(s).catch(e=>({title:s[0],artist:s[1],skipped:String(e.message).slice(0,80)})))));
