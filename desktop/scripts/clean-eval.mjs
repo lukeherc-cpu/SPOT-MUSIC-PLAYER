@@ -12,7 +12,7 @@ import {searchMusicSongs} from '../src/ytmusic.mjs';
 import {findClean,core,pickSpotifyClean,pickVideoClean,videoTrack,baseTitle} from '../src/clean.mjs';
 
 const run=promisify(execFile);
-const SONGS=[['Wraith','Chance the Rapper'],['Money Trees','Kendrick Lamar'],['HUMBLE.','Kendrick Lamar'],['SICKO MODE','Travis Scott'],['Lose Yourself','Eminem'],
+const SONGS=[['Stuck in the Middle','Tai Verdes'],['WHATS POPPIN (feat. DaBaby, Tory Lanez & Lil Wayne) - Remix','Jack Harlow'],['Wraith','Chance the Rapper'],['Money Trees','Kendrick Lamar'],['HUMBLE.','Kendrick Lamar'],['SICKO MODE','Travis Scott'],['Lose Yourself','Eminem'],
   ["God's Plan",'Drake'],['WAP','Cardi B'],['INDUSTRY BABY','Lil Nas X'],['rockstar','Post Malone'],['Congratulations','Post Malone'],['Mo Bamba','Sheck Wes'],
   ['Gold Digger','Kanye West'],['POWER','Kanye West'],['Starboy','The Weeknd'],['The Hills','The Weeknd'],['Love Galore','SZA'],['Kill Bill','SZA'],
   ['vampire','Olivia Rodrigo'],['Lucid Dreams','Juice WRLD'],['Mask Off','Future']];
