@@ -38,7 +38,7 @@ function videoCandidates(song,videos){
  * {choices, checked} so the listener can pick, with what was heard in each upload checked.
  */
 export async function findClean(catalog,searchVideos,song,{musicSearch=null,verifier=null,progress=()=>{}}={}){
-  const artist=firstArtist(song);
+  const artist=firstArtist(song);progress({step:'Searching for clean versions',fraction:.02});
   const spotify=q=>catalog.search(q).then(r=>r.tracks||[]).catch(()=>[]);
   const videos=q=>searchVideos(q).catch(()=>[]);
   const music=q=>musicSearch?musicSearch(q).catch(()=>[]):Promise.resolve([]);
@@ -54,8 +54,8 @@ export async function findClean(catalog,searchVideos,song,{musicSearch=null,veri
   if(!verifier&&candidates[0])return{track:make(candidates[0]),verified:false};
   const checked=[];
   for(const [i,candidate] of (verifier?candidates:[]).entries()){
-    progress({step:i+1,of:candidates.length});
-    const result=await verifier.check(song,candidate.videoId,candidate.durationMs);
+    // 10% searching, 25% the explicit recording, the rest split across candidates.
+    const result=await verifier.check(song,candidate.videoId,candidate.durationMs,(isCandidate,f)=>progress(isCandidate?{step:`Checking clean version ${i+1} of ${candidates.length} for swearing`,fraction:.35+.65*(i+f)/candidates.length}:{step:'Listening to the explicit version',fraction:.1+.25*f}));
     checked.push({videoId:candidate.videoId,title:candidate.title,channel:candidate.channel,verdict:result.verdict,heard:result.heard||[],...(result.message?{message:result.message}:{})});
     if(result.verdict==='clean')return{track:make(candidate),verified:true,checked};
   }

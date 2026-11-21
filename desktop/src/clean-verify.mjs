@@ -50,9 +50,10 @@ export class CleanVerifier{
     if(!file)throw Error('Audio download failed.');
     return path.join(dir,file);
   }
-  async transcribe(file,windows,dir){
+  async transcribe(file,windows,dir,onWindow=()=>{}){
     const texts=[];
     for(const [i,w] of windows.entries()){
+      onWindow(i);
       const wav=path.join(dir,`w${i}.wav`),out=path.join(dir,`w${i}`);
       try{
         await this.run(this.exe('ffmpeg'),['-hide_banner','-loglevel','error','-nostdin','-ss',String(w.startMs/1000),'-i',file,'-t',String((w.endMs-w.startMs)/1000),'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le','-y',wav],{timeout:60000,maxBuffer:2e6,windowsHide:true});
@@ -65,7 +66,7 @@ export class CleanVerifier{
     return texts;
   }
   /** Control windows and transcripts for the explicit song, computed once per song. */
-  async control(song){
+  async control(song,progress=()=>{}){
     if(this.controls.has(song.isrc))return this.controls.get(song.isrc);
     const task=(async()=>{
       let windows=[];
@@ -74,7 +75,8 @@ export class CleanVerifier{
       const dir=await mkdtemp(path.join(os.tmpdir(),'cadence-clean-'));
       try{
         const target=song.youtubeVideoId?`https://www.youtube.com/watch?v=${song.youtubeVideoId}`:`ytsearch1:${song.artist} ${song.title} official audio`;
-        const texts=await this.transcribe(await this.download(target,dir),windows,dir);
+        progress(.05);
+        const texts=await this.transcribe(await this.download(target,dir),windows,dir,i=>progress((i+1)/(windows.length+1)));
         return{windows,texts,fromLyrics};
       }finally{await rm(dir,{recursive:true,force:true});}
     })();
@@ -82,15 +84,15 @@ export class CleanVerifier{
     return task;
   }
   /** Listens to a candidate upload. Returns {verdict:'clean'|'explicit'|'unverified'|'no-vocals'|'error', heard?}. */
-  async check(song,videoId,durationMs=0){
+  async check(song,videoId,durationMs=0,progress=()=>{}){
     if(!/^[A-Za-z0-9_-]{11}$/.test(videoId||''))return{verdict:'error'};
     try{
-      const control=await this.control(song);
+      const control=await this.control(song,f=>progress(false,f));progress(true,.05);
       const scale=durationMs>0&&song.durationMs>0&&Math.abs(durationMs-song.durationMs)<30000?durationMs/song.durationMs:1;
       const windows=control.windows.map(w=>({startMs:Math.round(w.startMs*scale),endMs:Math.round(w.endMs*scale)}));
       const dir=await mkdtemp(path.join(os.tmpdir(),'cadence-clean-'));
       try{
-        const texts=await this.transcribe(await this.download(`https://www.youtube.com/watch?v=${videoId}`,dir),windows,dir);
+        const texts=await this.transcribe(await this.download(`https://www.youtube.com/watch?v=${videoId}`,dir),windows,dir,i=>progress(true,(i+1)/(windows.length+1)));
         return{...judge(control.texts,texts),fromLyrics:control.fromLyrics,control:control.texts,candidate:texts};
       }finally{await rm(dir,{recursive:true,force:true});}
     }catch(error){return{verdict:'error',message:String(error.stderr||error.message||error).replace(/https?:\/\/\S+/g,'[url]').slice(-400)};}

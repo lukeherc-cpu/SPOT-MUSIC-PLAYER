@@ -264,6 +264,10 @@ async function importSpotify(){
 const cleanBase=title=>String(title).split(' (')[0].split(' - ')[0]||String(title);
 const cleanFromVideo=(song,v)=>({isrc:`youtube:${v.videoId}`,title:`${cleanBase(song.title)} (Clean)`,artist:song.artist,album:song.album,durationMs:v.durationMs>0?v.durationMs:song.durationMs,albumArtUrl:song.albumArtUrl,source:'YOUTUBE',youtubeVideoId:v.videoId,isExplicit:false});
 /** Makes a clean version and keeps both: it goes right after the explicit song in the library, the page on screen and the queue. */
+let cleanTimer=null;
+function cleanBar(p){let el=document.querySelector('#clean-progress');if(!p){el?.remove();return;}if(!el){el=document.createElement('div');el.id='clean-progress';el.setAttribute('role','status');document.body.append(el);}const pct=Math.round(Math.max(0,Math.min(1,Number(p.fraction)||0))*100);el.innerHTML=`<strong>Making a clean version of ${h(p.title)}</strong><span>${pct}%</span><small>${h(p.step)}</small><div class="bar"><i style="width:${pct}%"></i></div>`;}
+// Shows how far along finding and checking a clean version is, polled from the main process.
+function watchClean(song){clearInterval(cleanTimer);cleanTimer=null;if(!song){cleanBar(null);return;}cleanBar({title:song.title,step:'Starting',fraction:0});cleanTimer=setInterval(async()=>{try{const p=await call('cleanProgress');if(p&&cleanTimer)cleanBar(p);}catch{}},500);}
 async function applyClean(song,clean,verified=false){
   state.library=await call('addVersion',song.isrc,clean);
   const add=list=>{if(!Array.isArray(list)||!list.some(t=>t.isrc===song.isrc))return list;const rest=list.filter(t=>t.isrc!==clean.isrc),at=rest.findIndex(t=>t.isrc===song.isrc);return [...rest.slice(0,at+1),{...clean,...(rest[at]._from?{_from:rest[at]._from}:{})},...rest.slice(at+1)];};
@@ -542,8 +546,8 @@ document.addEventListener('click',async event=>{
     case'artist-radio':{const d=state.route.data;await visit({type:'radio',seed:{artist:d.title,uri:d.uri,albumArtUrl:d.artwork},title:`${d.title} Radio`});break;}
     case'autoplay':prefs.autoplay=value==='On';savePrefs();render();break;
     case'menu-clean':{const t=state.menu;if(state.cleaning)break;state.menu=null;state.cleaning=t.isrc;renderOverlays();toast('Finding a clean version and listening to it for swearing. This can take a minute.');
-      try{const found=await call('cleanVersion',t);if(found.track)await applyClean(t,found.track,true);else{state.modal={type:'clean',song:t,choices:found.choices||[],checked:found.checked||[]};renderOverlays();}}finally{state.cleaning=null;}break;}
-    case'clean-pick':{const m=state.modal;if(m.checking)break;m.checking=item.title;renderOverlays();let result;try{result=await call('cleanCheck',m.song,item.videoId,item.durationMs);}finally{m.checking=null;}
+      watchClean(t);try{const found=await call('cleanVersion',t);if(found.track)await applyClean(t,found.track,true);else{state.modal={type:'clean',song:t,choices:found.choices||[],checked:found.checked||[]};renderOverlays();}}finally{state.cleaning=null;watchClean(null);}break;}
+    case'clean-pick':{const m=state.modal;if(m.checking)break;m.checking=item.title;renderOverlays();let result;watchClean(m.song);try{result=await call('cleanCheck',m.song,item.videoId,item.durationMs);}finally{m.checking=null;watchClean(null);}
       if(result.verdict==='explicit'){item.verdict='explicit';m.choices=m.choices.filter(x=>x.videoId!==item.videoId);m.checked=[...(m.checked||[]),{videoId:item.videoId,verdict:'explicit'}];toast(`Heard swearing in that upload${result.heard?.length?` (${result.heard.length} ${result.heard.length===1?'word':'words'})`:''}, so it wasn't added.`);if(state.modal===m)renderOverlays();break;}
       if(result.verdict==='no-vocals'){item.verdict='no-vocals';toast('That upload sounds instrumental, so it wasn\'t added.');if(state.modal===m)renderOverlays();break;}
       if(state.modal===m){state.modal=null;renderOverlays();}await applyClean(m.song,cleanFromVideo(m.song,item),result.verdict==='clean');break;}

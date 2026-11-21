@@ -39,6 +39,7 @@ internal object CleanMatch {
 }
 
 /** YouTube uploads the listener can pick from when no clean version is found on its own. */
+data class CleanProgress(val title: String, val step: String, val fraction: Float)
 data class CleanChoices(val song: Track, val collectionKey: String?, val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val listened: Int = 0, val swore: Int = 0, val checking: String? = null, val notes: Map<String, CleanVerdict> = emptyMap(), val controlVideoId: String? = null)
 
 data class SpotifyAccountState(val signedIn: Boolean = false, val name: String? = null, val loading: Boolean = false, val playlists: List<SpotifyCard> = emptyList(), val mixes: List<SpotifyCard> = emptyList(), val error: String? = null, val progress: String? = null)
@@ -122,6 +123,9 @@ class SpotViewModel @Inject constructor(
     private val _cleanChoices = MutableStateFlow<CleanChoices?>(null)
     val cleanChoices = _cleanChoices.asStateFlow()
     private val _cleanSearching = MutableStateFlow<String?>(null)
+    private val _cleanProgress = MutableStateFlow<CleanProgress?>(null)
+    /** How far along making or checking a clean version is, for the progress bar. */
+    val cleanProgress = _cleanProgress.asStateFlow()
     /** The song whose clean version is being looked for, so the menu can show progress. */
     val cleanSearching = _cleanSearching.asStateFlow()
     private val _opening = MutableStateFlow<Track?>(null)
@@ -567,8 +571,9 @@ class SpotViewModel @Inject constructor(
     /** Makes a clean version of an explicit song and keeps both: the clean one sits right after the explicit one. */
     fun makeCleanVersion(song: Track, collectionKey: String?) = viewModelScope.launch {
         _cleanSearching.value = song.isrc
+        _cleanProgress.value = CleanProgress(song.title, "Searching for clean versions", .02f)
         _messages.emit("Finding a clean version of ${song.title} and listening to it for swearing. This can take a minute.")
-        val outcome = try { findClean(song) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } finally { _cleanSearching.value = null }
+        val outcome = try { findClean(song) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } finally { _cleanSearching.value = null; _cleanProgress.value = null }
         val clean = outcome?.track
         if (clean == null) { chooseCleanVideo(song, collectionKey, outcome); return@launch }
         applyClean(song, collectionKey, clean, verified = true)
@@ -597,8 +602,10 @@ class SpotViewModel @Inject constructor(
             val song = choice.song
             val result = try {
                 val control = choice.controlVideoId ?: controlVideo(song) ?: error("No explicit recording to compare with")
-                cleanVerifier.check(song, control, video.videoId, video.durationMs)
-            } catch (e: CancellationException) { throw e } catch (_: Exception) { CleanResult(CleanVerdict.ERROR) }
+                cleanVerifier.check(song, control, video.videoId, video.durationMs) { candidate, f ->
+                    _cleanProgress.value = CleanProgress(song.title, if (candidate) "Listening to the upload you picked" else "Listening to the explicit version", if (candidate) .4f + .6f * f else .4f * f)
+                }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { CleanResult(CleanVerdict.ERROR) } finally { _cleanProgress.value = null }
             when (result.verdict) {
                 CleanVerdict.EXPLICIT -> {
                     _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(checking = null, videos = it.videos.filter { v -> v.videoId != video.videoId }, listened = it.listened + 1, swore = it.swore + 1) else it }
@@ -688,9 +695,15 @@ class SpotViewModel @Inject constructor(
         val candidates = (fromMusic + fromVideos).distinctBy { it.first }
         val control = controlVideo(song, musicSongs) ?: return@coroutineScope CleanOutcome(null, emptyMap(), null)
         val checked = linkedMapOf<String, CleanVerdict>()
-        for ((videoId, title, durationMs) in candidates) {
+        val total = candidates.count { it.first != control }.coerceAtLeast(1)
+        for ((videoId, _, durationMs) in candidates) {
             if (videoId == control) continue
-            val result = cleanVerifier.check(song, control, videoId, durationMs)
+            val index = checked.size
+            val result = cleanVerifier.check(song, control, videoId, durationMs) { candidate, f ->
+                // 10% searching, 25% the explicit recording, the rest split across candidates.
+                _cleanProgress.value = if (!candidate) CleanProgress(song.title, "Listening to the explicit version", .1f + .25f * f)
+                    else CleanProgress(song.title, "Checking clean version ${index + 1} of $total for swearing", .35f + .65f * (index + f) / total)
+            }
             checked[videoId] = result.verdict
             if (result.verdict == CleanVerdict.CLEAN) {
                 val track = spotifyClean?.copy(isExplicit = false, youtubeVideoId = videoId) ?: Track("youtube:$videoId", title = "$base (Clean)",
