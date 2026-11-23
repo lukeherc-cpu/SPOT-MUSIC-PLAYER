@@ -116,13 +116,14 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                     if (track != null) SpotMiniPlayer(track, vm.player, isPlaying, opening != null, track.isrc in favoriteIds,
                         onOpen = { fullPlayer = true }, onSave = { vm.saveToLiked(track); saveTrack = track }, onBounds = { miniBounds = it })
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(62.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // Account sits where Create used to be. Create is now the + at the top of each page.
-                        val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic), Triple(Page.Settings, "Account", Icons.Outlined.Person))
+                        // Home, Search, Create, then Your Library at the far right. The profile picture is at the top left of each page.
+                        val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(null, "Create", Icons.Filled.Add), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic))
                         entries.forEach { (target, title, icon) ->
-                            val selected = page == target
-                            Column(Modifier.weight(1f).fillMaxHeight().clickable { navigate(target) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                if (target == Page.Settings) Box(Modifier.size(27.dp).then(if (selected) Modifier.border(1.5.dp, Color.White, CircleShape) else Modifier).padding(if (selected) 2.dp else 0.dp), contentAlignment = Alignment.Center) { SAvatar(null, if (selected) 23.dp else 26.dp) }
-                                else Icon(if (selected && target == Page.Home) Icons.Filled.Home else icon, null, tint = if (selected) Color.White else Muted, modifier = Modifier.size(27.dp))
+                            val selected = target != null && page == target
+                            Column(Modifier.weight(1f).fillMaxHeight().clickable { if (target == null) createSheet = true else navigate(target) }
+                                .then(if (target == null) Modifier.semantics(mergeDescendants = true) { contentDescription = "Create or import" } else Modifier),
+                                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Icon(if (selected && target == Page.Home) Icons.Filled.Home else icon, null, tint = if (selected) Color.White else Muted, modifier = Modifier.size(27.dp))
                                 Text(title, style = MaterialTheme.typography.labelSmall, color = if (selected) Color.White else Muted, modifier = Modifier.padding(top = 4.dp))
                             }
                         }
@@ -138,7 +139,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                     Page.Home -> PullToRefreshBox(isRefreshing = pullRequested && home.loading, onRefresh = { pullRequested = true; vm.refreshHome() }, indicator = {}) { LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
                         item {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CreateButton { createSheet = true }
+                                SAvatar({ navigate(Page.Settings) })
                                 LazyRow(Modifier.padding(start = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(listOf("All", "Music", "Podcasts")) { filter -> SChip(filter, homeFilter == filter) { homeFilter = filter } }
                                 }
@@ -208,7 +209,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         home.error?.let { error -> item { ErrorRow(error, vm::refreshHome) } }
                     } }
                     Page.Search -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                        PageTitle("Search", { createSheet = true })
+                        PageTitle("Search", { navigate(Page.Settings) })
                         SearchInput(search.query, vm::search)
                         if (search.query.isBlank()) {
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -295,7 +296,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         }
                     }
                     Page.Library -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                        PageTitle("Your Library", { createSheet = true }, trailing = {
+                        PageTitle("Your Library", { navigate(Page.Settings) }, trailing = {
                             SIcon(Icons.Outlined.Search, "Search", onClick = { navigate(Page.Search) })
                         })
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -411,17 +412,9 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
 private val SEARCH_FILTERS = listOf("All", "Artists", "Songs", "Podcasts", "Playlists", "YouTube")
 
 @Composable
-private fun PageTitle(title: String, create: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
+private fun PageTitle(title: String, profile: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        CreateButton(create); Text(title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.headlineMedium, maxLines = 1); trailing()
-    }
-}
-
-/** Create lives at the top left, where the profile picture used to be: just a +, no label. */
-@Composable
-private fun CreateButton(onClick: () -> Unit) {
-    Box(Modifier.size(34.dp).clip(CircleShape).background(Card).clickable(onClickLabel = "Create or import", onClick = onClick).semantics { contentDescription = "Create or import" }, contentAlignment = Alignment.Center) {
-        Icon(Icons.Filled.Add, null, tint = Color.White, modifier = Modifier.size(24.dp))
+        SAvatar(profile); Text(title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.headlineMedium, maxLines = 1); trailing()
     }
 }
 
