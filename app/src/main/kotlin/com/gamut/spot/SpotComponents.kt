@@ -180,13 +180,14 @@ internal fun ExplicitBadge() {
 }
 
 @Composable
-internal fun SLibraryRow(title: String, subtitle: String, image: String?, liked: Boolean = false, onClick: () -> Unit) {
+internal fun SLibraryRow(title: String, subtitle: String, image: String?, liked: Boolean = false, downloaded: Boolean = false, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         SArt(image, Modifier.size(64.dp), liked = liked)
         Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (downloaded) Icon(Icons.Filled.DownloadForOffline, "Downloaded", tint = Green, modifier = Modifier.padding(start = 8.dp, end = 4.dp).size(24.dp))
     }
 }
 

@@ -26,6 +26,29 @@ internal object SearchRanking {
         if (q.isEmpty() || t.isEmpty()) return 0
         return when { t == q -> 100; t.startsWith("$q ") || q.startsWith("$t ") -> 70; q in t -> 40; else -> 0 }
     }
+    private fun distance(a: String, b: String): Int {
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1); cur[0] = i
+            for (j in 1..b.length) cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            prev = cur
+        }
+        return prev[b.length]
+    }
+    /**
+     * How well a query names an artist, allowing a typo or two ("chappel roan" is Chappell Roan) and a
+     * name still being typed ("chappell r"). Exact names score 100.
+     */
+    fun artistMatch(query: String, name: String): Int {
+        val q = bare(query); val n = bare(name)
+        if (q.length < 3 || n.isEmpty()) return if (q == n && q.isNotEmpty()) 100 else 0
+        if (q == n) return 100
+        val q0 = q.replace(" ", ""); val n0 = n.replace(" ", "")
+        if (q0 == n0) return 98
+        if (distance(q0, n0) <= maxOf(1, n0.length / 6)) return 92
+        if (q.length >= 4 && n.startsWith(q)) return 85
+        return match(query, name)
+    }
     /** A mood, activity, genre or era, where people want playlists before single songs. */
     fun isMood(query: String) = moods.matches(query.trim().replace(Regex("\\s+"), " "))
 
@@ -34,10 +57,22 @@ internal object SearchRanking {
         val mood = isMood(query)
         val sameTitleSongs = tracks.count { bare(plain(it.title)) == bare(query) }
         fun best(titles: List<String>, bonus: Int) = titles.take(5).mapIndexed { i, title -> match(query, title) + bonus - i }.maxOrNull() ?: 0
+        // The artist outranks their own songs: a search that names them shows them first.
+        val artistScore = artists.take(3).mapIndexed { i, artist ->
+            val owns = tracks.take(6).count { fold(it.artist.substringBefore(',')) == fold(artist.title) } >= 2
+            val named = artistMatch(query, artist.title)
+            named + 10 - i + if (owns && named >= 85) 25 else 0
+        }.maxOrNull() ?: 0
+        // "artist song" or "song artist" names one song exactly.
+        val artistAndTitle = tracks.take(5).mapIndexed { i, t ->
+            val a = t.artist.substringBefore(','); val p = plain(t.title)
+            if (bare("$a $p") == bare(query) || bare("$p $a") == bare(query)) 108 - i else 0
+        }.maxOrNull() ?: 0
+        val songScore = maxOf(best(tracks.map { plain(it.title) }, 8), artistAndTitle) - if (sameTitleSongs >= 3) 20 else 0
         val scores = mutableMapOf(
             Section.Podcasts to best(shows.map { it.title }, 12),
-            Section.Artists to best(artists.map { it.title }, 10),
-            Section.Songs to best(tracks.map { plain(it.title) }, 8) - if (sameTitleSongs >= 3) 20 else 0,
+            Section.Artists to artistScore,
+            Section.Songs to songScore,
             Section.Albums to best(albums.map { it.title }, 4),
             Section.Playlists to best(playlists.map { it.title }, 2),
         )

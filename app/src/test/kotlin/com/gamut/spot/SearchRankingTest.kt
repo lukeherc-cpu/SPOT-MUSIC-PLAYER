@@ -35,4 +35,13 @@ class SearchRankingTest {
         assertEquals(Section.Artists, SearchRanking.order("the weeknd", listOf(song("Starboy", "The Weeknd")), emptyList(), emptyList(), listOf(card("The Weeknd", "artist")), emptyList(), listOf("artist")).first())
         assertEquals(Section.Songs, SearchRanking.order("zzqx", emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()).first())
     }
+
+    @Test fun artistComesBeforeTheirSongsEvenWithATypo() {
+        val songs = listOf(song("Good Luck, Babe!", "Chappell Roan"), song("Red Wine Supernova", "Chappell Roan"), song("Pink Pony Club", "Chappell Roan"))
+        for (query in listOf("chappell roan", "chappel roan", "chappell r", "Chappell Roan")) {
+            assertEquals(query, Section.Artists, SearchRanking.order(query, songs, emptyList(), emptyList(), listOf(card("Chappell Roan", "artist")), emptyList(), listOf("song")).first())
+        }
+        assertEquals(Section.Songs, SearchRanking.order("chappell roan pink pony club", songs, emptyList(), emptyList(), listOf(card("Chappell Roan", "artist")), emptyList(), listOf("song")).first())
+        assertEquals(Section.Songs, SearchRanking.order("pink pony club", songs, emptyList(), emptyList(), listOf(card("Chappell Roan", "artist")), emptyList(), listOf("song")).first())
+    }
 }

@@ -83,9 +83,13 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     var libraryFilter by rememberSaveable { mutableStateOf("All") }
     var homeFilter by rememberSaveable { mutableStateOf("All") }
     var searchFilter by rememberSaveable { mutableStateOf("All") }
+    if (searchFilter !in SEARCH_FILTERS) searchFilter = "All"
     var libraryGrid by rememberSaveable { mutableStateOf(false) }
+    var librarySort by rememberSaveable { mutableStateOf(LibrarySort.Recent) }
+    var sortMenu by remember { mutableStateOf(false) }
+    val listening by vm.listening.collectAsState()
+    val downloadedIds by vm.downloadedIds.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    val cleanProgress by vm.cleanProgress.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -113,17 +117,17 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 Column(Modifier.background(Brush.verticalGradient(listOf(Black.copy(alpha = .94f), Color.Black)))) {
-                    cleanProgress?.let { progress -> CleanProgressBar(progress) }
                     if (track != null) SpotMiniPlayer(track, vm.player, isPlaying, opening != null, track.isrc in favoriteIds,
                         onOpen = { fullPlayer = true }, onSave = { vm.saveToLiked(track); saveTrack = track }, onBounds = { miniBounds = it })
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(62.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // Account sits where Create used to be. Create is now the + at the top of each page.
-                        val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic), Triple(Page.Settings, "Account", Icons.Outlined.Person))
+                        // Home, Search, Create, then Your Library at the far right. The profile picture is at the top left of each page.
+                        val entries = listOf(Triple(Page.Home, "Home", Icons.Outlined.Home), Triple(Page.Search, "Search", Icons.Outlined.Search), Triple(null, "Create", Icons.Filled.Add), Triple(Page.Library, "Your Library", Icons.Outlined.LibraryMusic))
                         entries.forEach { (target, title, icon) ->
-                            val selected = page == target
-                            Column(Modifier.weight(1f).fillMaxHeight().clickable { navigate(target) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                if (target == Page.Settings) Box(Modifier.size(27.dp).then(if (selected) Modifier.border(1.5.dp, Color.White, CircleShape) else Modifier).padding(if (selected) 2.dp else 0.dp), contentAlignment = Alignment.Center) { SAvatar(null, if (selected) 23.dp else 26.dp) }
-                                else Icon(if (selected && target == Page.Home) Icons.Filled.Home else icon, null, tint = if (selected) Color.White else Muted, modifier = Modifier.size(27.dp))
+                            val selected = target != null && page == target
+                            Column(Modifier.weight(1f).fillMaxHeight().clickable { if (target == null) createSheet = true else navigate(target) }
+                                .then(if (target == null) Modifier.semantics(mergeDescendants = true) { contentDescription = "Create or import" } else Modifier),
+                                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Icon(if (selected && target == Page.Home) Icons.Filled.Home else icon, null, tint = if (selected) Color.White else Muted, modifier = Modifier.size(27.dp))
                                 Text(title, style = MaterialTheme.typography.labelSmall, color = if (selected) Color.White else Muted, modifier = Modifier.padding(top = 4.dp))
                             }
                         }
@@ -139,7 +143,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                     Page.Home -> PullToRefreshBox(isRefreshing = pullRequested && home.loading, onRefresh = { pullRequested = true; vm.refreshHome() }, indicator = {}) { LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
                         item {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CreateButton { createSheet = true }
+                                SAvatar({ navigate(Page.Settings) })
                                 LazyRow(Modifier.padding(start = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(listOf("All", "Music", "Podcasts")) { filter -> SChip(filter, homeFilter == filter) { homeFilter = filter } }
                                 }
@@ -191,7 +195,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             home.rails.take(1).forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
                             item { CategoryRail("Explore your genres", BrowseCategory.entries.filter { it.genre != null }.shuffled(kotlin.random.Random(home.mixes.firstOrNull()?.id.hashCode() + recent.size)).take(6), home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct(), vm::openBrowse) }
                             home.rails.drop(1).forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title.replace("More like", "Popular with listeners of"), rail.cards, vm::openCard) } }
-                            item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos) }
+                            item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, onUnmute = vm.player::pause) }
                         }
                         if (homeFilter != "Music") {
                             if (home.podcastsLoading) item { RailSkeleton() }
@@ -209,7 +213,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         home.error?.let { error -> item { ErrorRow(error, vm::refreshHome) } }
                     } }
                     Page.Search -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                        PageTitle("Search", { createSheet = true })
+                        PageTitle("Search", { navigate(Page.Settings) })
                         SearchInput(search.query, vm::search)
                         if (search.query.isBlank()) {
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -218,7 +222,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 fun group(value: BrowseGroup) = BrowseCategory.entries.filter { it.group == value }
                                 item { SHeading("Browse all") }
                                 item { CategoryGrid(group(BrowseGroup.Top), artwork = art, podcastArtwork = home.shows.firstOrNull()?.artwork, onCategory = vm::openBrowse, compact = true) }
-                                item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, "Videos you can watch") }
+                                item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, "Videos you can watch", onUnmute = vm.player::pause) }
                                 if (home.newEpisodes.isNotEmpty()) item { NewEpisodeRail(home.newEpisodes, newShows, vm) }
                                 else if (home.episodes.isNotEmpty()) item { NewEpisodeRail(home.episodes, emptySet(), vm) }
                                 item { CategoryRail("More for you", group(BrowseGroup.More) + BrowseCategory.NewReleases + BrowseCategory.Charts, art.drop(3), vm::openBrowse) }
@@ -232,8 +236,9 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             }
                         } else {
                             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(listOf("All", "Music", "Podcasts", "Playlists", "Albums", "Artists", "YouTube")) { filter -> SChip(filter, searchFilter == filter) { searchFilter = filter } }
+                                items(SEARCH_FILTERS) { filter -> SChip(filter, searchFilter == filter) { searchFilter = filter } }
                             }
+                            val typing = search.query.trim().length < 2
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                                 if (searchFilter == "YouTube") {
                                     item { Text("YouTube", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp)) }
@@ -241,18 +246,22 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     items(search.youtube, key = { "youtube-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.youtube) }, onMore = { actions = song }) }
                                     if (search.youtubeLoading) item { DiscoverySkeleton() }
                                     search.youtubeError?.let { message -> item { ErrorRow(message, vm::searchYoutube) } }
-                                    if (!search.youtubeLoading && search.youtubeError == null && search.youtube.isEmpty()) item { Text("No YouTube results yet. Try a song title and artist.", color = Muted, modifier = Modifier.padding(16.dp)) }
-                                }
-                                // Sections follow the query: a show name puts Podcasts first, a mood or era puts Playlists first.
+                                    if (!typing && !search.youtubeLoading && search.youtubeError == null && search.youtube.isEmpty()) item { Text("No YouTube results yet. Try a song title and artist.", color = Muted, modifier = Modifier.padding(16.dp)) }
+                                } else if (typing) {
+                                    item { Text("Keep typing to search songs, artists, podcasts and playlists.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                } else if (!search.ready) {
+                                    // One skeleton until every source has answered, so placeholder sections never flash by.
+                                    item(key = "search-skeleton") { SearchSkeleton() }
+                                } else {
+                                // Sections follow the query: an artist's name puts Artists first, a show name puts Podcasts first, a mood or era puts Playlists first.
                                 val order = SearchRanking.order(search.query, search.tracks, search.shows, search.rich.playlists, search.rich.artists, search.rich.albums, search.rich.top)
                                 order.forEach { section ->
                                     when (section) {
                                 SearchRanking.Section.Songs -> {
-                                if (searchFilter in listOf("All", "Music")) {
+                                if (searchFilter in listOf("All", "Songs")) {
                                     if (search.tracks.isNotEmpty()) item { SHeading("Songs") }
                                     val songs = if (searchFilter == "All") CleanVersions.preview(search.tracks, 6) else search.tracks
                                     items(songs, key = { "search-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.tracks) }, onMore = { actions = song }) }
-                                    if (search.musicLoading) item { DiscoverySkeleton() }
                                     search.notice?.let { item { Text(it, style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(16.dp)) } }
                                 }
                                 }
@@ -262,7 +271,6 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     val shows = if (searchFilter == "All") search.shows.take(3) else search.shows
                                     items(shows, key = { "podcast-${it.feedUrl}" }) { show -> SLibraryRow(show.title, "Podcast · ${show.author}", show.artwork) { keyboard?.hide(); vm.openShow(show) } }
                                     if (search.rich.podcasts.isNotEmpty()) item { SCardRail("From Spotify", search.rich.podcasts.take(if (searchFilter == "All") 4 else 25), vm::openCard) }
-                                    if (search.podcastLoading) item { DiscoverySkeleton() }
                                     search.podcastError?.let { item { ErrorRow(it) { vm.search(search.query) } } }
                                 }
                                 }
@@ -270,50 +278,86 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 if (searchFilter in listOf("All", "Playlists")) item { SCardRail("Playlists", search.rich.playlists, vm::openCard) }
                                 }
                                 SearchRanking.Section.Albums -> {
-                                if (searchFilter in listOf("All", "Albums")) item { SCardRail("Albums", search.rich.albums, vm::openCard) }
+                                if (searchFilter == "All") item { SCardRail("Albums", search.rich.albums, vm::openCard) }
                                 }
                                 SearchRanking.Section.Artists -> {
                                 if (searchFilter in listOf("All", "Artists")) item { SCardRail("Artists", search.rich.artists, vm::openCard) }
                                 }
                                     }
                                 }
-                                if (searchFilter != "YouTube" && !search.musicLoading && !search.podcastLoading && search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty()) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                val empty = when (searchFilter) {
+                                    "Artists" -> search.rich.artists.isEmpty()
+                                    "Songs" -> search.tracks.isEmpty()
+                                    "Podcasts" -> search.shows.isEmpty() && search.rich.podcasts.isEmpty()
+                                    "Playlists" -> search.rich.playlists.isEmpty()
+                                    else -> search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty() && search.rich.artists.isEmpty()
+                                }
+                                val stillLoading = when (searchFilter) { "Songs" -> search.musicLoading; "Podcasts" -> search.podcastLoading; else -> false }
+                                if (empty && stillLoading) item { SearchSkeleton() }
+                                else if (empty) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                }
                             }
                         }
                     }
                     Page.Library -> Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                        PageTitle("Your Library", { createSheet = true }, trailing = {
+                        PageTitle("Your Library", { navigate(Page.Settings) }, trailing = {
                             SIcon(Icons.Outlined.Search, "Search", onClick = { navigate(Page.Search) })
                         })
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(listOf("All", "Playlists", "Podcasts", "Downloads")) { filter -> SChip(filter, libraryFilter == filter) { libraryFilter = filter } }
                         }
-                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Sort, null, Modifier.size(20.dp)); Text("Your collection", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Change sort order") { sortMenu = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.Sort, null, Modifier.size(20.dp)); Text(librarySort.label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
+                                }
+                                DropdownMenu(sortMenu, onDismissRequest = { sortMenu = false }) {
+                                    LibrarySort.entries.forEach { option ->
+                                        DropdownMenuItem(text = { Text(option.label, color = if (option == librarySort) Green else Color.White) }, onClick = { librarySort = option; sortMenu = false },
+                                            trailingIcon = { if (option == librarySort) Icon(Icons.Filled.Check, null, tint = Green) })
+                                    }
+                                }
+                            }
                             SIcon(if (libraryGrid) Icons.Outlined.ViewList else Icons.Outlined.GridView, "Change library layout", onClick = { libraryGrid = !libraryGrid })
                         }
+                        // Sorted by the chosen order: recently played, most listened, or A to Z. Liked Songs stays on top.
+                        val sortedPlaylists = remember(playlists, playlistTracks, listening, librarySort) { when (librarySort) {
+                            LibrarySort.Recent -> playlists.sortedByDescending { listening.collectionLast(it.id.toString(), playlistTracks[it.id].orEmpty()) }
+                            LibrarySort.MostPlayed -> playlists.sortedByDescending { listening.collectionCount(it.id.toString(), playlistTracks[it.id].orEmpty()) }
+                            LibrarySort.Alphabetical -> playlists.sortedBy { it.name.lowercase() }
+                        } }
+                        val sortedShows = remember(follows, listening, librarySort) { when (librarySort) {
+                            LibrarySort.Recent -> follows.sortedByDescending { listening.showLast(it.title) }
+                            LibrarySort.MostPlayed -> follows.sortedByDescending { listening.showCount(it.title) }
+                            LibrarySort.Alphabetical -> follows.sortedBy { it.title.lowercase() }
+                        } }
+                        val sortedDownloads = remember(downloadedTracks, listening, librarySort) { when (librarySort) {
+                            LibrarySort.Recent -> downloadedTracks.sortedByDescending { listening.songLast(it.isrc) }
+                            LibrarySort.MostPlayed -> downloadedTracks.sortedByDescending { listening.songCount(it.isrc) }
+                            LibrarySort.Alphabetical -> downloadedTracks.sortedBy { it.title.lowercase() }
+                        } }
                         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                             if (libraryFilter in listOf("All", "Playlists")) {
-                                item { SLibraryRow("Liked Songs", "Playlist · ${favorites.size} songs", null, liked = true) { vm.openPlaylist("liked") } }
+                                item { SLibraryRow("Liked Songs", "Playlist · ${favorites.size} songs", null, liked = true, downloaded = vm.isDownloaded(favorites, downloadedIds)) { vm.openPlaylist("liked") } }
                                 if (libraryGrid) {
-                                    items(playlists.chunked(2)) { pair -> Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    items(sortedPlaylists.chunked(2)) { pair -> Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         pair.forEach { playlist -> Column(Modifier.weight(1f).clickable { vm.openPlaylist(playlist.id.toString()) }) {
                                             SArt(playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f))
                                             Text(playlist.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         } }
                                         if (pair.size == 1) Spacer(Modifier.weight(1f))
                                     } }
-                                } else items(playlists, key = { "library-${it.id}" }) { playlist -> SLibraryRow(playlist.name, "Playlist · ${playlistTracks[playlist.id]?.size ?: 0} songs", playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl) { vm.openPlaylist(playlist.id.toString()) } }
+                                } else items(sortedPlaylists, key = { "library-${it.id}" }) { playlist -> SLibraryRow(playlist.name, "Playlist · ${playlistTracks[playlist.id]?.size ?: 0} songs", playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl, downloaded = vm.isDownloaded(playlistTracks[playlist.id].orEmpty(), downloadedIds)) { vm.openPlaylist(playlist.id.toString()) } }
                             }
                             if (libraryFilter in listOf("All", "Podcasts")) {
-                                if (follows.isNotEmpty()) items(follows, key = { "follow-${it.feedUrl}" }) { show -> Box {
+                                if (follows.isNotEmpty()) items(sortedShows, key = { "follow-${it.feedUrl}" }) { show -> Box {
                                     SLibraryRow(show.title, if (show.feedUrl in newShows) "New episode · ${show.author}" else "Podcast · ${show.author}", show.artwork) { vm.openShow(show) }
                                     if (show.feedUrl in newShows) NewDot(Modifier.align(Alignment.CenterEnd).padding(end = 20.dp))
                                 } }
                                 else item { TextButton(onClick = { searchFilter = "Podcasts"; navigate(Page.Search); vm.search("popular podcasts") }, modifier = Modifier.padding(8.dp)) { Text("Find podcasts to follow", color = Color.White) } }
                             }
                             if (libraryFilter == "Downloads") {
-                                val saved = downloadedTracks
+                                val saved = sortedDownloads
                                 if (saved.isEmpty()) item { Text("Songs you download will appear here.", color = Muted, modifier = Modifier.padding(24.dp)) }
                                 items(saved, key = { it.isrc }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { vm.play(song, saved) }, onMore = { actions = song }) }
                             }
@@ -364,10 +408,8 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
         } }
         cleanChoices?.let { choice -> ModalBottomSheet(onDismissRequest = vm::dismissCleanChoices, containerColor = Color(0xFF222222)) {
             LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
-                item { SHeading("No verified clean version") }
-                item { Text((if (choice.listened > 0) "Cadence listened to ${choice.listened} ${if (choice.listened == 1) "upload" else "uploads"} of ${choice.song.title}${if (choice.swore > 0) " and heard swearing in ${choice.swore}" else ""}, so none was added. " else "Cadence couldn't find a clean version of ${choice.song.title} on its own. ") +
-                    "Pick an upload below and Cadence will listen to it for swearing before adding it. Tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
-                choice.checking?.let { title -> item { cleanProgress?.let { CleanProgressBar(it) } ?: Text("Listening to $title for swearing…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) } }
+                item { SHeading("Pick a clean version") }
+                item { Text("YouTube uploads of ${choice.song.title}. Tap one to add it next to the explicit version, or tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
                 if (choice.loading) item { DiscoverySkeleton() }
                 else if (choice.videos.isEmpty()) item { Text("No YouTube uploads found. Try the YouTube filter in Search.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 items(choice.videos, key = { "clean-${it.videoId}" }) { video ->
@@ -375,7 +417,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         SArt("https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg", Modifier.width(96.dp).height(54.dp))
                         Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(video.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(listOfNotNull(video.channelName.takeIf { it.isNotBlank() }, video.durationMs.takeIf { it > 0 }?.let(::timeLabel), "Clean".takeIf { CleanMatch.cleanLabel.containsMatchIn(video.title) }, when (choice.notes[video.videoId]) { CleanVerdict.UNVERIFIED -> "Couldn't confirm it's clean"; CleanVerdict.NO_VOCALS -> "Sounds instrumental"; else -> null }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(listOfNotNull(video.channelName.takeIf { it.isNotBlank() }, video.durationMs.takeIf { it > 0 }?.let(::timeLabel), "Clean".takeIf { CleanMatch.cleanLabel.containsMatchIn(video.title) }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         SIcon(Icons.Filled.PlayArrow, "Preview ${video.title}", onClick = {
                             val preview = Track("youtube:${video.videoId}", title = video.title, artist = video.channelName, durationMs = video.durationMs, albumArtUrl = "https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId)
@@ -396,18 +438,13 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     }
 }
 
-@Composable
-private fun PageTitle(title: String, create: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        CreateButton(create); Text(title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.headlineMedium, maxLines = 1); trailing()
-    }
-}
+/** Search filters, in the order they appear. */
+private val SEARCH_FILTERS = listOf("All", "Artists", "Songs", "Podcasts", "Playlists", "YouTube")
 
-/** Create lives at the top left, where the profile picture used to be: just a +, no label. */
 @Composable
-private fun CreateButton(onClick: () -> Unit) {
-    Box(Modifier.size(34.dp).clip(CircleShape).background(Card).clickable(onClickLabel = "Create or import", onClick = onClick).semantics { contentDescription = "Create or import" }, contentAlignment = Alignment.Center) {
-        Icon(Icons.Filled.Add, null, tint = Color.White, modifier = Modifier.size(24.dp))
+private fun PageTitle(title: String, profile: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        SAvatar(profile); Text(title, Modifier.weight(1f).padding(start = 14.dp), style = MaterialTheme.typography.headlineMedium, maxLines = 1); trailing()
     }
 }
 
@@ -467,18 +504,4 @@ internal fun ErrorRow(message: String, retry: () -> Unit) {
 }
 @Composable internal fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, action: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 20.dp), style = MaterialTheme.typography.bodyLarge) }
-}
-
-/** Progress while Cadence finds a clean version and listens to it for swearing. */
-@Composable
-private fun CleanProgressBar(progress: CleanProgress) {
-    val shown by androidx.compose.animation.core.animateFloatAsState(progress.fraction.coerceIn(0f, 1f), label = "clean progress")
-    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF2A2A2A)).padding(horizontal = 12.dp, vertical = 10.dp).semantics(mergeDescendants = true) {}) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Making a clean version of ${progress.title}", style = MaterialTheme.typography.bodyMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text("${(shown * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = Muted)
-        }
-        Text(progress.step, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
-        LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)), color = Green, trackColor = Color.White.copy(alpha = .15f))
-    }
 }

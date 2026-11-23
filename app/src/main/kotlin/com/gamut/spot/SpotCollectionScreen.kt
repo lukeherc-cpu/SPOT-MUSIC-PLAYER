@@ -68,7 +68,11 @@ internal fun SpotCollectionScreen(detail: SpotDetail, vm: SpotViewModel, favorit
                         val following = follows.any { it.feedUrl == detail.podcast.feedUrl }
                         OutlinedButton(onClick = { vm.podcastStore.toggle(detail.podcast) }, shape = CircleShape, modifier = Modifier.padding(start = 8.dp)) { Text(if (following) "Following" else "Follow", color = Color.White) }
                     } else if (detail.spotify != null) SIcon(if (vm.isImported(detail.key)) Icons.Filled.CheckCircle else Icons.Outlined.AddCircleOutline, "Save collection to library", tint = if (vm.isImported(detail.key)) Green else Muted, onClick = onImport)
-                    if (detail.podcast == null) SIcon(Icons.Outlined.DownloadForOffline, "Download collection", tint = Muted, onClick = { vm.downloads.download(detail.tracks, detail.title) })
+                    if (detail.podcast == null) {
+                        val saved by vm.downloadedIds.collectAsState()
+                        val downloaded = vm.isDownloaded(detail.tracks, saved)
+                        SIcon(if (downloaded) Icons.Filled.DownloadForOffline else Icons.Outlined.DownloadForOffline, if (downloaded) "Downloaded" else "Download collection", tint = if (downloaded) Green else Muted, onClick = { if (!downloaded) vm.downloads.download(detail.tracks, detail.title) })
+                    }
                     SIcon(Icons.Outlined.MoreVert, "Collection options", tint = Muted, onClick = { menu = true })
                     Spacer(Modifier.weight(1f))
                     if (detail.podcast == null) SIcon(Icons.Outlined.Shuffle, "Shuffle", tint = if (shuffle) Green else Muted, onClick = { vm.player.setShuffle(!shuffle) })

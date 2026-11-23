@@ -37,6 +37,8 @@ internal fun SpotImportScreen(vm: SpotViewModel, link: String, onLink: (String) 
     LaunchedEffect(account.signedIn) { if (account.signedIn && account.playlists.isEmpty() && account.mixes.isEmpty()) vm.loadSpotifyLibrary() }
     val all = remember(account.playlists, account.mixes) { (account.mixes + account.playlists).distinctBy { it.uri } }
     val busy = account.progress != null
+    val imports by vm.imports.collectAsState()
+    val synced = all.count { it.uri in imports }
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Row(verticalAlignment = Alignment.CenterVertically) { SIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack); Text("Import from Spotify", style = MaterialTheme.typography.titleLarge) } }
         item { Text("Bring your music with you", style = MaterialTheme.typography.headlineLarge) }
@@ -57,8 +59,14 @@ internal fun SpotImportScreen(vm: SpotViewModel, link: String, onLink: (String) 
                     if (all.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { chosen = if (chosen.size == all.size) emptySet() else all.mapTo(hashSetOf()) { it.uri } }, enabled = !busy) { Text(if (chosen.size == all.size) "Clear all" else "Select all", color = Green) }
                         Spacer(Modifier.weight(1f))
-                        Button(onClick = { vm.importSpotifyCards(all.filter { it.uri in chosen }); chosen = emptySet() }, enabled = chosen.isNotEmpty() && !busy, shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color.Black)) {
-                            Text(if (chosen.isEmpty()) "Import" else "Import ${chosen.size}", fontWeight = FontWeight.Bold)
+                        // With nothing picked, the same button resyncs everything imported before, bringing over only the changes.
+                        Button(onClick = { if (chosen.isEmpty()) vm.resyncSpotify() else vm.importSpotifyCards(all.filter { it.uri in chosen }); chosen = emptySet() }, enabled = (chosen.isNotEmpty() || synced > 0) && !busy, shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color.Black)) {
+                            Text(when {
+                                chosen.isEmpty() && synced > 0 -> "Resync $synced"
+                                chosen.isEmpty() -> "Import"
+                                chosen.all { it in imports } -> "Resync ${chosen.size}"
+                                else -> "Import ${chosen.size}"
+                            }, fontWeight = FontWeight.Bold)
                         }
                     }
                     account.progress?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Color.White); LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green) }
@@ -70,17 +78,17 @@ internal fun SpotImportScreen(vm: SpotViewModel, link: String, onLink: (String) 
             if (account.loading && all.isEmpty()) item { DiscoverySkeleton() }
             if (account.mixes.isNotEmpty()) {
                 item { Text("Your mixes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                items(account.mixes, key = { "mix-" + it.uri }) { card -> PickRow(card, card.uri in chosen, !busy) { chosen = if (it) chosen + card.uri else chosen - card.uri } }
+                items(account.mixes, key = { "mix-" + it.uri }) { card -> PickRow(card, card.uri in chosen, !busy, card.uri in imports) { chosen = if (it) chosen + card.uri else chosen - card.uri } }
             } else if (!account.loading && account.error == null) item { Text("No mixes found yet. Spotify makes them after some listening.", color = Muted, style = MaterialTheme.typography.bodySmall) }
             if (account.playlists.isNotEmpty()) {
                 item { Text("Your playlists", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                items(account.playlists.filter { p -> account.mixes.none { it.uri == p.uri } }, key = { "playlist-" + it.uri }) { card -> PickRow(card, card.uri in chosen, !busy) { chosen = if (it) chosen + card.uri else chosen - card.uri } }
+                items(account.playlists.filter { p -> account.mixes.none { it.uri == p.uri } }, key = { "playlist-" + it.uri }) { card -> PickRow(card, card.uri in chosen, !busy, card.uri in imports) { chosen = if (it) chosen + card.uri else chosen - card.uri } }
             }
         }
         item { Text("Or paste a link", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp)) }
         item { Text("Paste a public Spotify playlist or album link. We'll keep its songs, order and artwork in your library.", color = Muted) }
         item { OutlinedTextField(link, onLink, label = { Text("Spotify link") }, placeholder = { Text("https://open.spotify.com/playlist/…") }, modifier = Modifier.fillMaxWidth(), maxLines = 3, enabled = !importing) }
-        item { Button(onClick = onImportLink, enabled = link.isNotBlank() && !importing, modifier = Modifier.fillMaxWidth().height(50.dp), shape = CircleShape) { Text(if (importing) "Importing…" else "Import songs", fontWeight = FontWeight.Bold) } }
+        item { Button(onClick = onImportLink, enabled = link.isNotBlank() && !importing, modifier = Modifier.fillMaxWidth().height(50.dp), shape = CircleShape) { Text(if (importing) "Importing…" else "Import or resync", fontWeight = FontWeight.Bold) } }
         if (importing) item { WordsSkeleton() }
         item { Text("Cadence only reads your Spotify library. It never changes it.", style = MaterialTheme.typography.bodySmall, color = Muted) }
     }
@@ -88,12 +96,12 @@ internal fun SpotImportScreen(vm: SpotViewModel, link: String, onLink: (String) 
 }
 
 @Composable
-private fun PickRow(card: SpotifyCard, picked: Boolean, enabled: Boolean, onPick: (Boolean) -> Unit) {
+private fun PickRow(card: SpotifyCard, picked: Boolean, enabled: Boolean, imported: Boolean, onPick: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(enabled = enabled) { onPick(!picked) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         SArt(spotifyThumb(card.artwork), Modifier.size(56.dp))
         Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(card.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(card.subtitle, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text((if (imported) "In your library · " else "") + card.subtitle, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Checkbox(picked, onPick, enabled = enabled, colors = CheckboxDefaults.colors(checkedColor = Green, checkmarkColor = Color.Black))
     }

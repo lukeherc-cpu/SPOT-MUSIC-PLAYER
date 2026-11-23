@@ -22,11 +22,25 @@ import javax.inject.Inject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+/** Last play time and play count, keyed "t:" song id, "c:" playlist or collection key, "s:" podcast title. */
+data class ListeningStats(val last: Map<String, Long> = emptyMap(), val counts: Map<String, Int> = emptyMap()) {
+    fun songLast(isrc: String) = last["t:$isrc"] ?: 0L
+    fun songCount(isrc: String) = counts["t:$isrc"] ?: 0
+    fun collectionLast(key: String, tracks: List<Track>) = maxOf(last["c:$key"] ?: 0L, tracks.maxOfOrNull { songLast(it.isrc) } ?: 0L)
+    fun collectionCount(key: String, tracks: List<Track>) = (counts["c:$key"] ?: 0) + tracks.sumOf { songCount(it.isrc) }
+    fun showLast(title: String) = last["s:" + title.lowercase()] ?: 0L
+    fun showCount(title: String) = counts["s:" + title.lowercase()] ?: 0
+}
+
+enum class LibrarySort(val label: String) { Recent("Recently played"), MostPlayed("Most listened"), Alphabetical("Alphabetical") }
+
 data class MusicRail(val title: String, val cards: List<SpotifyCard>)
 data class HomeEpisode(val show: PodcastShow, val episode: PodcastEpisode)
 data class SpotHome(val mixes: List<DailyMix> = emptyList(), val personal: List<DailyMix> = emptyList(), val newEpisodes: List<HomeEpisode> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val podcastReason: String = "", val episodes: List<HomeEpisode> = emptyList(), val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val podcastsLoading: Boolean = true, val videosLoading: Boolean = true, val error: String? = null)
-data class SpotSearch(val query: String = "", val tracks: List<Track> = emptyList(), val rich: SpotifySearch = SpotifySearch(), val shows: List<PodcastShow> = emptyList(), val youtube: List<Track> = emptyList(), val youtubeLoading: Boolean = false, val youtubeError: String? = null, val musicLoading: Boolean = false, val podcastLoading: Boolean = false, val notice: String? = null, val podcastError: String? = null)
+data class SpotSearch(val query: String = "", val tracks: List<Track> = emptyList(), val rich: SpotifySearch = SpotifySearch(), val shows: List<PodcastShow> = emptyList(), val youtube: List<Track> = emptyList(), val youtubeLoading: Boolean = false, val youtubeError: String? = null, val musicLoading: Boolean = false, val podcastLoading: Boolean = false, val notice: String? = null, val podcastError: String? = null, val ready: Boolean = false)
 data class SpotDetail(val key: String, val title: String, val subtitle: String, val artwork: String? = null, val description: String = "", val tracks: List<Track> = emptyList(), val loading: Boolean = false, val error: String? = null, val spotify: SpotifyCollection? = null, val podcast: PodcastShow? = null, val episodes: List<PodcastEpisode> = emptyList(), val skipped: Int = 0)
+
+private const val SEARCH_SETTLE_MS = 8_000L
 
 internal object CleanMatch {
     val cleanLabel = Regex("\\bclean\\b|\\bedited\\b|radio edit|censored|clean version", RegexOption.IGNORE_CASE)
@@ -39,8 +53,7 @@ internal object CleanMatch {
 }
 
 /** YouTube uploads the listener can pick from when no clean version is found on its own. */
-data class CleanProgress(val title: String, val step: String, val fraction: Float)
-data class CleanChoices(val song: Track, val collectionKey: String?, val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val listened: Int = 0, val swore: Int = 0, val checking: String? = null, val notes: Map<String, CleanVerdict> = emptyMap(), val controlVideoId: String? = null)
+data class CleanChoices(val song: Track, val collectionKey: String?, val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true)
 
 data class SpotifyAccountState(val signedIn: Boolean = false, val name: String? = null, val loading: Boolean = false, val playlists: List<SpotifyCard> = emptyList(), val mixes: List<SpotifyCard> = emptyList(), val error: String? = null, val progress: String? = null)
 
@@ -69,7 +82,6 @@ class SpotViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val avatars: com.gamut.account.AvatarRepository,
     private val spotifyAccount: SpotifyAccountStore,
-    private val cleanVerifier: CleanVerifier,
 ) : ViewModel() {
     // Plays per song, kept on this device. Used for "Your most listened to" on artist pages.
     private val plays by lazy { appContext.getSharedPreferences("cadence_play_counts", android.content.Context.MODE_PRIVATE) }
@@ -78,6 +90,32 @@ class SpotViewModel @Inject constructor(
     val playlistTracks = playlists.flatMapLatest { list ->
         if (list.isEmpty()) flowOf(emptyMap()) else combine(list.map { p -> library.observeTracks(p.id).map { p.id to it } }) { it.toMap() }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    /** Songs saved on the device, by id, for the filled download icon on playlists. */
+    val downloadedIds = downloadIndex.downloads.map { it.keys }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    fun isDownloaded(tracks: List<Track>, saved: Set<String>) = tracks.isNotEmpty() && tracks.all { it.isrc in saved }
+    // When songs, playlists and shows were last played and how often, for sorting Your Library.
+    private val listenPrefs by lazy { appContext.getSharedPreferences("cadence_listening", android.content.Context.MODE_PRIVATE) }
+    private val _listening = MutableStateFlow(ListeningStats())
+    val listening = _listening.asStateFlow()
+    private fun loadListening() = viewModelScope.launch(Dispatchers.IO) {
+        val last = HashMap<String, Long>(); val counts = HashMap<String, Int>()
+        listenPrefs.all.forEach { (k, v) -> val parts = (v as? String)?.split(',') ?: return@forEach; parts.getOrNull(0)?.toLongOrNull()?.let { last[k] = it }; parts.getOrNull(1)?.toIntOrNull()?.let { counts[k] = it } }
+        plays.all.forEach { (k, v) -> (v as? Int)?.let { counts["t:$k"] = maxOf(counts["t:$k"] ?: 0, it) } }
+        _listening.value = ListeningStats(last, counts)
+    }
+    private fun recordListen(track: Track) {
+        val now = System.currentTimeMillis()
+        val keys = listOfNotNull("t:${track.isrc}", _playContext.value?.let { "c:$it" }, track.album?.takeIf { track.source == TrackSource.PODCAST }?.let { "s:" + it.lowercase() })
+        val stats = _listening.value
+        val last = stats.last.toMutableMap(); val counts = stats.counts.toMutableMap()
+        val editor = listenPrefs.edit()
+        keys.forEach { key -> last[key] = now; counts[key] = (counts[key] ?: 0) + 1; editor.putString(key, "$now,${counts[key]}") }
+        // Keep the store small: drop the oldest entries past 3,000.
+        val all = listenPrefs.all
+        if (all.size > 3000) all.keys.sortedBy { (all[it] as? String)?.substringBefore(',')?.toLongOrNull() ?: 0 }.take(all.size - 3000).forEach { editor.remove(it) }
+        editor.apply()
+        _listening.value = ListeningStats(last, counts)
+    }
     val downloadedTracks = downloadIndex.downloads.mapLatest { saved -> saved.keys.toList().chunked(400).flatMap { trackDao.getByIsrcs(it) }.map { it.toDomain() } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val recents = recentRepository.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -122,12 +160,7 @@ class SpotViewModel @Inject constructor(
     private var accountJob: Job? = null
     private val _cleanChoices = MutableStateFlow<CleanChoices?>(null)
     val cleanChoices = _cleanChoices.asStateFlow()
-    private val _cleanSearching = MutableStateFlow<String?>(null)
-    private val _cleanProgress = MutableStateFlow<CleanProgress?>(null)
-    /** How far along making or checking a clean version is, for the progress bar. */
-    val cleanProgress = _cleanProgress.asStateFlow()
-    /** The song whose clean version is being looked for, so the menu can show progress. */
-    val cleanSearching = _cleanSearching.asStateFlow()
+    private var cleanJob: Job? = null
     private val _opening = MutableStateFlow<Track?>(null)
     val opening = _opening.asStateFlow()
     private val _importing = MutableStateFlow(false)
@@ -139,8 +172,44 @@ class SpotViewModel @Inject constructor(
     private var detailJob: Job? = null
     private var homeJob: Job? = null
     private var playJob: Job? = null
-    private val imported = mutableSetOf<String>()
+    // Spotify collections already imported, by Spotify uri, mapped to the local playlist. Kept on the device,
+    // so importing the same collection again only applies what changed instead of making a second copy.
+    private val importPrefs by lazy { appContext.getSharedPreferences("cadence_imports", android.content.Context.MODE_PRIVATE) }
+    private val _imports = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val imports = _imports.asStateFlow()
+    private fun loadImports() = viewModelScope.launch(Dispatchers.IO) {
+        _imports.value = importPrefs.all.mapNotNull { (k, v) -> (v as? Long)?.let { k to it } }.toMap()
+    }
+    private data class Synced(val id: Long, val added: Int, val removed: Int, val fresh: Boolean)
+    /** Saves a fetched Spotify collection: a new playlist the first time, afterwards only the songs that changed. */
+    private suspend fun saveCollection(uri: String, collection: SpotifyCollection, artwork: String?): Synced {
+        val songs = collection.tracks.distinctBy { it.isrc }
+        // Playlists imported before this was remembered are matched by name, so they aren't copied a second time.
+        val existing = _imports.value[uri]?.takeIf { id -> playlists.value.any { it.id == id } }
+            ?: playlists.value.firstOrNull { p -> p.name == collection.title && p.id !in _imports.value.values }?.id?.also { id ->
+                withContext(Dispatchers.IO) { importPrefs.edit().putLong(uri, id).apply() }; _imports.update { it + (uri to id) }
+            }
+        if (existing == null) {
+            val id = library.importPlaylist(collection.title, collection.artwork ?: artwork, songs)
+            withContext(Dispatchers.IO) { importPrefs.edit().putLong(uri, id).apply() }
+            _imports.update { it + (uri to id) }
+            return Synced(id, songs.size, 0, fresh = true)
+        }
+        val before = library.observeTracks(existing).first().map { it.isrc }.toSet()
+        val after = songs.map { it.isrc }.toSet()
+        val added = songs.filter { it.isrc !in before }
+        added.forEach { trackDao.upsert(it.toEntity()) }
+        if (added.isNotEmpty() || (before - after).isNotEmpty() || before.size != after.size) library.replaceTracks(existing, songs)
+        return Synced(existing, added.size, (before - after).size, fresh = false)
+    }
+    private fun Synced.summary(title: String) = when {
+        fresh -> "Imported $added songs"
+        added == 0 && removed == 0 -> "$title is up to date"
+        else -> "Synced $title: " + listOfNotNull("$added added".takeIf { added > 0 }, "$removed removed".takeIf { removed > 0 }).joinToString(", ")
+    }
     init {
+        loadListening()
+        loadImports()
         viewModelScope.launch {
             combine(recents, favorites, followedShows) { history, saved, shows -> SpotDiscovery.fingerprint(history, saved) + history.filter { it.source == TrackSource.PODCAST }.take(15).joinToString { it.isrc } + shows.joinToString { it.feedUrl } }
                 .distinctUntilChanged().debounce(800).collect { refreshHome() }
@@ -151,7 +220,7 @@ class SpotViewModel @Inject constructor(
                 when (state) {
                     is PlaybackState.Playing -> {
                         if (_opening.value?.isrc == state.track.isrc) _opening.value = null
-                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); lastId = state.track.isrc; preloadWords(state.track) }
+                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); recordListen(state.track); lastId = state.track.isrc; preloadWords(state.track) }
                     }
                     is PlaybackState.Error -> { _opening.value = null; _messages.tryEmit(state.message) }
                     else -> Unit
@@ -310,7 +379,7 @@ class SpotViewModel @Inject constructor(
         searchJob = viewModelScope.launch {
             delay(300)
             supervisorScope {
-                launch {
+                val music = launch {
                     try {
                         searchRepository.search(q).collect { result ->
                             _search.update { it.copy(tracks = withCleanVersions(result.tracks), musicLoading = !result.isFinal, notice = result.catalogNotice) }
@@ -319,14 +388,20 @@ class SpotViewModel @Inject constructor(
                     } catch (e: CancellationException) { throw e }
                     catch (_: Exception) { _search.update { it.copy(musicLoading = false, notice = "Music search is unavailable. Try again.") } }
                 }
-                launch {
+                val spotify = launch {
                     try { val result = catalog.searchAll(q); _search.update { it.copy(rich = result) } }
                     catch (e: CancellationException) { throw e } catch (_: Exception) {}
                 }
-                launch {
+                val podcasts = launch {
                     try { val shows = podcastRepository.search(q); _search.update { it.copy(shows = shows, podcastLoading = false) } }
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) { _search.update { it.copy(podcastLoading = false, podcastError = "Podcast search is unavailable. Try again.") } }
+                }
+                // Results show all at once, in their final order, so sections never jump around while sources answer.
+                // A slow source doesn't hold the page past SEARCH_SETTLE_MS; its results join when they arrive.
+                launch {
+                    withTimeoutOrNull(SEARCH_SETTLE_MS) { joinAll(music, spotify, podcasts) }
+                    _search.update { it.copy(ready = true) }
                 }
             }
         }
@@ -498,16 +573,15 @@ class SpotViewModel @Inject constructor(
                 val collection = catalog.collection(link)
                 require(collection.tracks.isNotEmpty()) { "This collection has no available music to import" }
                 // Fetch every page first, then commit the complete local collection atomically.
-                val id = library.importPlaylist(collection.title, collection.artwork, collection.tracks)
-                imported += collection.uri
-                _messages.emit("Imported ${collection.tracks.distinctBy { it.isrc }.size} songs${if (collection.skipped > 0) " · ${collection.skipped} unavailable items skipped" else ""}")
-                delay(100); openPlaylist(id.toString())
+                val synced = saveCollection(collection.uri, collection, null)
+                _messages.emit(synced.summary(collection.title) + if (collection.skipped > 0) " · ${collection.skipped} unavailable items skipped" else "")
+                delay(100); openPlaylist(synced.id.toString())
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { _messages.emit(e.message ?: "Spotify import failed. Check that the playlist is public.") }
             finally { _importing.value = false }
         }
     }
-    fun isImported(uri: String) = uri in imported
+    fun isImported(uri: String) = uri in _imports.value
 
     /** Called by the sign-in page once Spotify has signed the listener in. */
     fun signInSpotify(cookie: String) {
@@ -546,93 +620,72 @@ class SpotViewModel @Inject constructor(
             }
         }
     }
-    /** Imports the chosen playlists and mixes one at a time, each saved complete or not at all. */
+    /** Re-checks every collection imported before and applies only what changed. */
+    fun resyncSpotify() {
+        val account = _account.value
+        val known = (account.playlists + account.mixes).filter { it.uri in _imports.value }
+        importSpotifyCards(known)
+    }
+    /** Imports the chosen playlists and mixes one at a time, each saved complete or not at all. Ones imported before only get their changes. */
     fun importSpotifyCards(cards: List<SpotifyCard>) {
         if (cards.isEmpty() || _account.value.progress != null) return
         accountJob?.cancel()
         accountJob = viewModelScope.launch {
-            var done = 0; var failed = 0; var songs = 0
+            var done = 0; var failed = 0; var songs = 0; var synced = 0; var added = 0; var removed = 0
             try {
                 cards.forEachIndexed { index, card ->
-                    _account.update { it.copy(progress = "Importing ${index + 1} of ${cards.size}: ${card.title}") }
+                    _account.update { it.copy(progress = (if (card.uri in _imports.value) "Syncing" else "Importing") + " ${index + 1} of ${cards.size}: ${card.title}") }
                     try {
                         val collection = catalog.collection(card.uri)
                         if (collection.tracks.isEmpty()) { failed++; return@forEachIndexed }
-                        library.importPlaylist(collection.title, collection.artwork ?: card.artwork, collection.tracks)
-                        imported += card.uri; done++; songs += collection.tracks.distinctBy { it.isrc }.size
+                        val result = saveCollection(card.uri, collection, card.artwork)
+                        if (result.fresh) { done++; songs += result.added } else { synced++; added += result.added; removed += result.removed }
                     } catch (e: CancellationException) { throw e } catch (_: Exception) { failed++ }
                 }
             } finally {
                 _account.update { it.copy(progress = null) }
-                if (done > 0 || failed > 0) _messages.tryEmit("Imported $done ${if (done == 1) "collection" else "collections"} · $songs songs" + if (failed > 0) " · $failed couldn't be imported" else "")
+                val parts = listOfNotNull(
+                    "Imported $done ${if (done == 1) "collection" else "collections"} · $songs songs".takeIf { done > 0 },
+                    "Synced $synced · ${if (added == 0 && removed == 0) "no changes" else "$added added, $removed removed"}".takeIf { synced > 0 },
+                    "$failed couldn't be loaded".takeIf { failed > 0 })
+                if (parts.isNotEmpty()) _messages.tryEmit(parts.joinToString(" · "))
             }
         }
     }
-    /** Makes a clean version of an explicit song and keeps both: the clean one sits right after the explicit one. */
-    fun makeCleanVersion(song: Track, collectionKey: String?) = viewModelScope.launch {
-        _cleanSearching.value = song.isrc
-        _cleanProgress.value = CleanProgress(song.title, "Searching for clean versions", .02f)
-        _messages.emit("Finding a clean version of ${song.title} and listening to it for swearing. This can take a minute.")
-        val outcome = try { findClean(song) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } finally { _cleanSearching.value = null; _cleanProgress.value = null }
-        val clean = outcome?.track
-        if (clean == null) { chooseCleanVideo(song, collectionKey, outcome); return@launch }
-        applyClean(song, collectionKey, clean, verified = true)
-    }
-    /** No verified clean version: show YouTube uploads (minus ones with swearing heard) and let the listener pick one to check. */
-    private suspend fun chooseCleanVideo(song: Track, collectionKey: String?, outcome: CleanOutcome?) {
-        val explicit = outcome?.checked.orEmpty().filterValues { it == CleanVerdict.EXPLICIT }.keys
-        _cleanChoices.value = CleanChoices(song, collectionKey, listened = outcome?.checked?.size ?: 0, swore = explicit.size, notes = outcome?.checked.orEmpty(), controlVideoId = outcome?.controlVideoId)
-        val artist = song.artist.substringBefore(',').trim()
-        val base = song.title.substringBefore(" (").substringBefore(" - ")
-        // One search at a time, like the Search tab, widening until enough uploads turn up.
-        val results = mutableListOf<YoutubeCandidate>()
-        for (q in listOf("$artist $base clean", "$artist $base radio edit", "$artist $base", "$base clean")) {
-            results += try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-            if (results.distinctBy { it.videoId }.size >= 12) break
+    /** Shows YouTube uploads of an explicit song right away. The one the listener picks is added as its clean version, next to the explicit one. */
+    fun makeCleanVersion(song: Track, collectionKey: String?) {
+        cleanJob?.cancel()
+        _cleanChoices.value = CleanChoices(song, collectionKey)
+        cleanJob = viewModelScope.launch {
+            val artist = song.artist.substringBefore(',').trim()
+            val base = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title }
+            val baseWords = CleanMatch.tokens(base)
+            // YouTube Music songs without the explicit badge are the label's clean masters, so they go first.
+            val music = async {
+                listOf("$base $artist clean", "$base $artist").map { q -> async { try { YoutubeMusicSongs.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } } }
+                    .awaitAll().flatten().filter { !it.explicit && CleanMatch.tokens(it.title).containsAll(baseWords) }
+                    .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = false, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
+            }
+            val uploads = listOf("$artist $base clean", "$artist $base radio edit", "$artist $base").map { q -> async { try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } } }
+            val found = (music.await() + uploads.awaitAll().flatten()).filter { isValidYoutubeVideoId(it.videoId) }.distinctBy { it.videoId }
+                .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { it.isMusicCatalog }.thenByDescending { CleanMatch.tokens(it.title).containsAll(baseWords) }.thenByDescending { it.viewCount })
+                .take(20)
+            _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(videos = found, loading = false) else it }
         }
-        // YouTube Music songs without the explicit badge are the label's clean masters.
-        val musicResults = listOf("$base $artist clean", "$base $artist").flatMap { q -> try { YoutubeMusicSongs.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } }
-            .filter { !it.explicit && CleanMatch.tokens(it.title).containsAll(CleanMatch.tokens(base)) }
-            .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = false, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
-        val found = (musicResults + results).filter { isValidYoutubeVideoId(it.videoId) && it.videoId !in explicit }.distinctBy { it.videoId }
-            .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { it.isMusicCatalog }.thenByDescending { CleanMatch.tokens(it.title).containsAll(CleanMatch.tokens(base)) }.thenByDescending { it.viewCount })
-            .take(15)
-        _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(videos = found, loading = false) else it }
     }
-    /** Checks a picked upload for swearing before adding it. */
+    /** Adds the picked upload as the song's clean version. */
     fun pickCleanVideo(video: YoutubeCandidate) {
         val choice = _cleanChoices.value ?: return
-        if (choice.checking != null) return
-        _cleanChoices.value = choice.copy(checking = video.title)
-        viewModelScope.launch {
-            val song = choice.song
-            val result = try {
-                val control = choice.controlVideoId ?: controlVideo(song) ?: error("No explicit recording to compare with")
-                cleanVerifier.check(song, control, video.videoId, video.durationMs) { candidate, f ->
-                    _cleanProgress.value = CleanProgress(song.title, if (candidate) "Listening to the upload you picked" else "Listening to the explicit version", if (candidate) .4f + .6f * f else .4f * f)
-                }
-            } catch (e: CancellationException) { throw e } catch (_: Exception) { CleanResult(CleanVerdict.ERROR) } finally { _cleanProgress.value = null }
-            when (result.verdict) {
-                CleanVerdict.EXPLICIT -> {
-                    _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(checking = null, videos = it.videos.filter { v -> v.videoId != video.videoId }, listened = it.listened + 1, swore = it.swore + 1) else it }
-                    _messages.emit("Heard swearing in that upload, so it wasn't added.")
-                }
-                CleanVerdict.NO_VOCALS -> {
-                    _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(checking = null, notes = it.notes + (video.videoId to CleanVerdict.NO_VOCALS)) else it }
-                    _messages.emit("That upload sounds instrumental, so it wasn't added.")
-                }
-                else -> {
-                    _cleanChoices.value = null
-                    val clean = Track("youtube:${video.videoId}", title = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title } + " (Clean)",
-                        artist = song.artist, album = song.album, durationMs = video.durationMs.takeIf { it > 0 } ?: song.durationMs, albumArtUrl = song.albumArtUrl,
-                        source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId, isExplicit = false, artists = song.artists)
-                    applyClean(song, choice.collectionKey, clean, verified = result.verdict == CleanVerdict.CLEAN)
-                }
-            }
-        }
+        cleanJob?.cancel()
+        _cleanChoices.value = null
+        val song = choice.song
+        val clean = Track("youtube:${video.videoId}", title = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title } + " (Clean)",
+            artist = song.artist, album = song.album, durationMs = video.durationMs.takeIf { it > 0 } ?: song.durationMs, albumArtUrl = song.albumArtUrl,
+            source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId, isExplicit = false, artists = song.artists)
+        viewModelScope.launch { applyClean(song, choice.collectionKey, clean) }
     }
-    fun dismissCleanChoices() { _cleanChoices.value = null }
-    private suspend fun applyClean(song: Track, collectionKey: String?, clean: Track, verified: Boolean) {
+    fun dismissCleanChoices() { cleanJob?.cancel(); _cleanChoices.value = null }
+    private suspend fun applyClean(song: Track, collectionKey: String?, clean: Track) {
         trackDao.upsert(clean.toEntity())
         cleanVersions[song.isrc] = clean
         withContext(Dispatchers.IO) { cleanPrefs.edit().putString("versions", homeJson.encodeToString(cleanMap, cleanVersions.toMap())).apply() }
@@ -654,71 +707,7 @@ class SpotViewModel @Inject constructor(
         val at = queue.tracks.indexOfFirst { it.isrc == song.isrc }
         if (at >= 0 && queue.tracks.none { it.isrc == clean.isrc }) player.addToQueue(clean, playNext = at == queue.currentIndex)
         val name = song.title.substringBefore(" (")
-        _messages.emit(if (verified) "Made a clean version of $name. Cadence listened to it and heard no swearing. Both versions are saved." else "Added a clean version of $name, but Cadence couldn't confirm it's clean. Both versions are saved.")
-    }
-    /** The explicit recording the player would use, to compare candidates against. */
-    private suspend fun controlVideo(song: Track, music: List<MusicSong> = emptyList()): String? {
-        song.youtubeVideoId?.let { return it }
-        val artistWords = CleanMatch.tokens(song.artist.substringBefore(',').trim())
-        fun matches(title: String, artist: String) = CleanMatch.core(title) == CleanMatch.core(song.title) && (artistWords.isEmpty() || artistWords.any { it in CleanMatch.tokens(artist) })
-        music.firstOrNull { it.explicit && matches(it.title, it.artist) && (song.durationMs <= 0 || it.durationMs <= 0 || kotlin.math.abs(it.durationMs - song.durationMs) <= 15_000) }?.let { return it.videoId }
-        val found = try { youtube.searchSongs("${song.artist.substringBefore(',').trim()} ${song.title}") } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-        return found.firstOrNull { isValidYoutubeVideoId(it.videoId) && matches(it.title, it.channelName + " " + it.title) }?.videoId ?: found.firstOrNull { isValidYoutubeVideoId(it.videoId) }?.videoId
-    }
-    data class CleanOutcome(val track: Track?, val checked: Map<String, CleanVerdict>, val controlVideoId: String?)
-    /**
-     * Finds a clean version of an explicit song and listens to it before trusting it. Candidates are YouTube Music
-     * songs without the explicit badge (the label's clean master, the same release Spotify lists as clean) and
-     * clean-labeled uploads. Spotify's clean track supplies the metadata when it has one.
-     */
-    private suspend fun findClean(song: Track): CleanOutcome = coroutineScope {
-        val artist = song.artist.substringBefore(',').trim()
-        val base = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title }
-        val words = CleanMatch.tokens(CleanMatch.core(song.title))
-        val artistWords = CleanMatch.tokens(artist)
-        suspend fun spotify(query: String) = try { catalog.searchAll(query).tracks } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-        suspend fun videos(query: String) = try { youtube.searchBroad(query) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-        suspend fun music(query: String) = try { YoutubeMusicSongs.search(query) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-        val spotifyJobs = listOf("${song.title} $artist", "${song.title} $artist clean", "${CleanMatch.core(song.title)} $artist edited").map { async { spotify(it) } }
-        val videoJobs = listOf("$artist $base clean", "$artist $base radio edit").map { async { videos(it) } }
-        val musicJobs = listOf("$base $artist", "$base $artist clean").map { async { music(it) } }
-        fun near(a: Long, b: Long, limit: Long) = a <= 0 || b <= 0 || kotlin.math.abs(a - b) <= limit
-        val spotifyClean = spotifyJobs.awaitAll().flatten().distinctBy { it.isrc }.filter { candidate ->
-            candidate.isrc != song.isrc && candidate.isExplicit == false && CleanMatch.core(candidate.title) == CleanMatch.core(song.title) &&
-                CleanMatch.tokens(candidate.artist).containsAll(artistWords) && near(candidate.durationMs, song.durationMs, 15_000)
-        }.minByOrNull { kotlin.math.abs(it.durationMs - song.durationMs) }
-        val dirty = Regex("explicit|dirty|uncensored", RegexOption.IGNORE_CASE)
-        val musicSongs = musicJobs.awaitAll().flatten().distinctBy { it.videoId }
-        val target = spotifyClean?.durationMs ?: song.durationMs
-        val fromMusic = musicSongs.filter { !it.explicit && CleanMatch.core(it.title) == CleanMatch.core(song.title) && !dirty.containsMatchIn(it.title) &&
-                (artistWords.isEmpty() || artistWords.any { w -> w in CleanMatch.tokens(it.artist) }) && near(it.durationMs, song.durationMs, 25_000) }
-            .sortedBy { kotlin.math.abs(it.durationMs - target) }.take(3).map { Triple(it.videoId, it.title, it.durationMs) }
-        val fromVideos = videoJobs.awaitAll().flatten().distinctBy { it.videoId }.filter { video ->
-            val text = CleanMatch.tokens(video.title + " " + video.channelName)
-            isValidYoutubeVideoId(video.videoId) && CleanMatch.cleanLabel.containsMatchIn(video.title) && !dirty.containsMatchIn(video.title) &&
-                text.containsAll(words) && (artistWords.isEmpty() || artistWords.any { it in text }) && near(video.durationMs, song.durationMs, 25_000)
-        }.sortedWith(compareByDescending<YoutubeCandidate> { it.isMusicCatalog || it.channelIsTopicChannel }.thenByDescending { it.viewCount }).take(2).map { Triple(it.videoId, it.title, it.durationMs) }
-        val candidates = (fromMusic + fromVideos).distinctBy { it.first }
-        val control = controlVideo(song, musicSongs) ?: return@coroutineScope CleanOutcome(null, emptyMap(), null)
-        val checked = linkedMapOf<String, CleanVerdict>()
-        val total = candidates.count { it.first != control }.coerceAtLeast(1)
-        for ((videoId, _, durationMs) in candidates) {
-            if (videoId == control) continue
-            val index = checked.size
-            val result = cleanVerifier.check(song, control, videoId, durationMs) { candidate, f ->
-                // 10% searching, 25% the explicit recording, the rest split across candidates.
-                _cleanProgress.value = if (!candidate) CleanProgress(song.title, "Listening to the explicit version", .1f + .25f * f)
-                    else CleanProgress(song.title, "Checking clean version ${index + 1} of $total for swearing", .35f + .65f * (index + f) / total)
-            }
-            checked[videoId] = result.verdict
-            if (result.verdict == CleanVerdict.CLEAN) {
-                val track = spotifyClean?.copy(isExplicit = false, youtubeVideoId = videoId) ?: Track("youtube:$videoId", title = "$base (Clean)",
-                    artist = song.artist, album = song.album, durationMs = durationMs.takeIf { it > 0 } ?: song.durationMs, albumArtUrl = song.albumArtUrl,
-                    source = TrackSource.YOUTUBE, youtubeVideoId = videoId, isExplicit = false, artists = song.artists)
-                return@coroutineScope CleanOutcome(track, checked, control)
-            }
-        }
-        CleanOutcome(null, checked, control)
+        _messages.emit("Added a clean version of $name. Both versions are saved.")
     }
     fun download(track: Track) { downloads.download(listOf(track)); _messages.tryEmit("Downloading ${track.title}") }
 }

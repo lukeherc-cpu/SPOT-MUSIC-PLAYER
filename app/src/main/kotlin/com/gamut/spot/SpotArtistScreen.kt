@@ -32,6 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.foundation.gestures.scrollBy
 import com.gamut.core.model.Track
 import java.text.NumberFormat
 
@@ -51,6 +53,35 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
     val scroll = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val current by remember(starts) { derivedStateOf { if (!scroll.canScrollForward && scroll.firstVisibleItemIndex > 0) starts.lastIndex else starts.indexOfLast { it <= scroll.firstVisibleItemIndex }.coerceAtLeast(0) } }
+    // The rail maps to the whole page: each section gets an equal share of the rail, and a spot within that
+    // share is the same fraction of the way through the section. Dragging scrubs the page continuously.
+    fun bounds() = starts + scroll.layoutInfo.totalItemsCount.coerceAtLeast(starts.last() + 1)
+    val position by remember(starts) { derivedStateOf {
+        if (!scroll.canScrollForward && scroll.firstVisibleItemIndex > 0) return@derivedStateOf starts.size.toFloat()
+        val b = bounds()
+        val first = scroll.layoutInfo.visibleItemsInfo.firstOrNull() ?: return@derivedStateOf 0f
+        val x = first.index + (-first.offset).toFloat() / first.size.coerceAtLeast(1)
+        val i = (b.indices.last { b[it] <= first.index }).coerceAtMost(starts.lastIndex)
+        i + ((x - b[i]) / (b[i + 1] - b[i]).coerceAtLeast(1)).coerceIn(0f, 1f)
+    } }
+    var scrub by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(scroll, starts) {
+        snapshotFlow { scrub }.collectLatest { p ->
+            if (p == null) return@collectLatest
+            val b = bounds()
+            val i = p.toInt().coerceIn(0, starts.lastIndex)
+            val x = b[i] + (p - i).coerceIn(0f, 1f) * (b[i + 1] - b[i])
+            val index = x.toInt().coerceAtMost(b.last() - 1); val frac = x - x.toInt()
+            val seen = scroll.layoutInfo.visibleItemsInfo
+            val target = seen.firstOrNull { it.index == index }
+            if (target != null) scroll.scrollBy(target.offset + frac * target.size)
+            else {
+                // Far off screen: land on the item, then glide the rest of the way.
+                val average = seen.map { it.size }.average().takeIf { !it.isNaN() } ?: 0.0
+                scroll.scrollToItem(index, (frac * average).toInt())
+            }
+        }
+    }
     Row(Modifier.fillMaxSize().background(Black).statusBarsPadding()) {
         LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item(key = "overview") {
@@ -121,27 +152,27 @@ internal fun SpotArtistScreen(detail: SpotDetail, vm: SpotViewModel, favorites: 
             }
         }
         Box(Modifier.width(48.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-            RightArtistTabs(listOf("Overview", "Songs", "Albums", "Latest"), current,
-                onDrag = { index -> scope.launch { scroll.scrollToItem(starts[index]) } },
+            RightArtistTabs(listOf("Overview", "Songs", "Albums", "Latest"), current, position,
+                onScrub = { scrub = it },
                 onSelect = { index -> scope.launch { scroll.animateScrollToItem(starts[index]) } })
         }
     }
 }
 
 @Composable
-private fun RightArtistTabs(labels: List<String>, selected: Int, onDrag: (Int) -> Unit, onSelect: (Int) -> Unit) {
+private fun RightArtistTabs(labels: List<String>, selected: Int, position: Float, onScrub: (Float?) -> Unit, onSelect: (Int) -> Unit) {
     var height by remember { mutableIntStateOf(1) }
-    val select by rememberUpdatedState(onDrag)
+    val scrubTo by rememberUpdatedState(onScrub)
     var dragY by remember { mutableStateOf<Float?>(null) }
-    val indicator by animateFloatAsState(dragY ?: ((selected + .5f) * height / labels.size), spring(stiffness = Spring.StiffnessMediumLow), label = "artist thumb")
+    // The thumb follows the page as it scrolls, and the finger while dragging.
+    val indicator = dragY ?: (position * height / labels.size)
     Box(Modifier.width(48.dp).fillMaxHeight(.56f).heightIn(max = 360.dp).onSizeChanged { height = it.height.coerceAtLeast(1) }
         .semantics { contentDescription = "Artist sections, drag to browse" }
         .pointerInput(labels) {
-            var last = -1
-            fun choose(y: Float) { dragY = y.coerceIn(0f, height.toFloat()); val index = (y / height * labels.size).toInt().coerceIn(0, labels.lastIndex); if (index != last) { last = index; select(index) } }
-            detectDragGestures(onDragStart = { last = -1; choose(it.y) }, onDragEnd = { dragY = null }, onDragCancel = { dragY = null }) { change, _ -> change.consume(); choose(change.position.y) }
+            fun choose(y: Float) { val at = y.coerceIn(0f, height.toFloat()); dragY = at; scrubTo(at / height * labels.size) }
+            detectDragGestures(onDragStart = { choose(it.y) }, onDragEnd = { dragY = null; scrubTo(null) }, onDragCancel = { dragY = null; scrubTo(null) }) { change, _ -> change.consume(); choose(change.position.y) }
         }) {
-        Box(Modifier.align(Alignment.TopEnd).width(3.dp).height(28.dp).offset { IntOffset(0, (indicator - 14.dp.roundToPx()).toInt()) }.background(Green, CircleShape))
+        Box(Modifier.align(Alignment.TopEnd).width(3.dp).height(28.dp).offset { val half = 14.dp.toPx(); IntOffset(0, (maxOf(half, minOf(indicator, height - half)) - half).toInt()) }.background(Green, CircleShape))
         Column(Modifier.fillMaxSize()) {
         labels.forEachIndexed { index, label ->
             val color by animateColorAsState(if (selected == index) Color.White else Muted.copy(alpha = .65f), tween(160), label = "artist section color")
