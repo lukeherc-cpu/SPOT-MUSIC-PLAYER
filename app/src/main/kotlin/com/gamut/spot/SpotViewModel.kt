@@ -652,68 +652,99 @@ class SpotViewModel @Inject constructor(
             }
         }
     }
-    /** Shows YouTube uploads of an explicit song right away. The one the listener picks is added as its clean version, next to the explicit one. */
+    /** YouTube uploads that could be [song]'s clean version, best first. */
+    private suspend fun cleanCandidates(song: Track): List<YoutubeCandidate> = coroutineScope {
+        val artist = song.artist.substringBefore(',').trim()
+        val base = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title }
+        val baseWords = CleanMatch.tokens(base)
+        // YouTube Music songs without the explicit badge are the label's clean masters, so they go first.
+        val music = async {
+            listOf("$base $artist clean", "$base $artist").map { q -> async { try { YoutubeMusicSongs.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } } }
+                .awaitAll().flatten().filter { !it.explicit && CleanMatch.tokens(it.title).containsAll(baseWords) }
+                .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = false, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
+        }
+        // YouTube searches share one yt-dlp instance and fail silently when run together, so they take turns,
+        // widening until enough uploads turn up.
+        val uploads = mutableListOf<YoutubeCandidate>()
+        for (q in listOf("$artist $base clean", "$artist $base radio edit", "$artist $base", "$base clean")) {
+            uploads += try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+            if (uploads.distinctBy { it.videoId }.size >= 12) break
+        }
+        (music.await() + uploads).filter { isValidYoutubeVideoId(it.videoId) }.distinctBy { it.videoId }
+            .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { it.isMusicCatalog }.thenByDescending { CleanMatch.tokens(it.title).containsAll(baseWords) }.thenByDescending { it.viewCount })
+            .take(20)
+    }
+    /** The explicit song a clean version was made from, or null when [track] isn't one. */
+    fun cleanOriginal(track: Track): Track? {
+        val key = cleanVersions.entries.firstOrNull { it.value.isrc == track.isrc }?.key ?: return null
+        return track.copy(isrc = key, title = track.title.removeSuffix(" (Clean)"), isExplicit = true, youtubeVideoId = null, source = TrackSource.SPOTIFY)
+    }
+    fun hasCleanVersion(song: Track): Boolean = song.isrc in cleanVersions
+    /** Adds the first YouTube recommendation as [song]'s clean version, replacing any earlier one. */
     fun makeCleanVersion(song: Track, collectionKey: String?) {
+        cleanJob?.cancel()
+        val name = song.title.substringBefore(" (")
+        _messages.tryEmit("Finding a clean version of $name…")
+        cleanJob = viewModelScope.launch {
+            val first = cleanCandidates(song).firstOrNull()
+            if (first == null) { _messages.emit("Couldn't find a clean version of $name"); return@launch }
+            applyClean(song, collectionKey, cleanTrack(song, first))
+        }
+    }
+    /** Lists YouTube uploads so the listener can pick a different clean source for [song]. */
+    fun changeCleanSource(song: Track, collectionKey: String?) {
         cleanJob?.cancel()
         _cleanChoices.value = CleanChoices(song, collectionKey)
         cleanJob = viewModelScope.launch {
-            val artist = song.artist.substringBefore(',').trim()
-            val base = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title }
-            val baseWords = CleanMatch.tokens(base)
-            // YouTube Music songs without the explicit badge are the label's clean masters, so they go first.
-            val music = async {
-                listOf("$base $artist clean", "$base $artist").map { q -> async { try { YoutubeMusicSongs.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } } }
-                    .awaitAll().flatten().filter { !it.explicit && CleanMatch.tokens(it.title).containsAll(baseWords) }
-                    .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = false, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
-            }
-            // YouTube searches share one yt-dlp instance and fail silently when run together, so they take turns,
-            // widening until enough uploads turn up.
-            val uploads = mutableListOf<YoutubeCandidate>()
-            for (q in listOf("$artist $base clean", "$artist $base radio edit", "$artist $base", "$base clean")) {
-                uploads += try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-                if (uploads.distinctBy { it.videoId }.size >= 12) break
-            }
-            val found = (music.await() + uploads).filter { isValidYoutubeVideoId(it.videoId) }.distinctBy { it.videoId }
-                .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { it.isMusicCatalog }.thenByDescending { CleanMatch.tokens(it.title).containsAll(baseWords) }.thenByDescending { it.viewCount })
-                .take(20)
+            val found = cleanCandidates(song)
             _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(videos = found, loading = false) else it }
         }
     }
-    /** Adds the picked upload as the song's clean version. */
+    private fun cleanTrack(song: Track, video: YoutubeCandidate) = Track("youtube:${video.videoId}",
+        title = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title } + " (Clean)",
+        artist = song.artist, album = song.album, durationMs = video.durationMs.takeIf { it > 0 } ?: song.durationMs, albumArtUrl = song.albumArtUrl,
+        source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId, isExplicit = false, artists = song.artists)
+    /** Uses the picked upload as the song's clean source. */
     fun pickCleanVideo(video: YoutubeCandidate) {
         val choice = _cleanChoices.value ?: return
         cleanJob?.cancel()
         _cleanChoices.value = null
-        val song = choice.song
-        val clean = Track("youtube:${video.videoId}", title = song.title.substringBefore(" (").substringBefore(" - ").ifBlank { song.title } + " (Clean)",
-            artist = song.artist, album = song.album, durationMs = video.durationMs.takeIf { it > 0 } ?: song.durationMs, albumArtUrl = song.albumArtUrl,
-            source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId, isExplicit = false, artists = song.artists)
-        viewModelScope.launch { applyClean(song, choice.collectionKey, clean) }
+        viewModelScope.launch { applyClean(choice.song, choice.collectionKey, cleanTrack(choice.song, video)) }
     }
     fun dismissCleanChoices() { cleanJob?.cancel(); _cleanChoices.value = null }
+    /** Each song has one clean version: a new one takes the old one's place everywhere it was saved. */
     private suspend fun applyClean(song: Track, collectionKey: String?, clean: Track) {
+        val old = cleanVersions[song.isrc]?.takeIf { it.isrc != clean.isrc }
         trackDao.upsert(clean.toEntity())
         cleanVersions[song.isrc] = clean
         withContext(Dispatchers.IO) { cleanPrefs.edit().putString("versions", homeJson.encodeToString(cleanMap, cleanVersions.toMap())).apply() }
-        _search.update { it.copy(tracks = withCleanVersions(it.tracks)) }
-        // Both versions stay: the clean one goes right after the explicit one wherever that is saved.
+        _search.update { it.copy(tracks = withCleanVersions(it.tracks.filter { t -> t.isrc != old?.isrc })) }
+        // The clean one sits right after the explicit one wherever that is saved, in place of any earlier clean version.
         fun List<Track>.withClean(): List<Track> {
-            if (none { it.isrc == song.isrc }) return this
-            val rest = filter { it.isrc != clean.isrc }
+            if (none { it.isrc == song.isrc || it.isrc == old?.isrc }) return this
+            val rest = filter { it.isrc != clean.isrc && it.isrc != old?.isrc }
             val at = rest.indexOfFirst { it.isrc == song.isrc }
+            if (at < 0) return map { if (it.isrc == old?.isrc) clean else it }.distinctBy { it.isrc }
             return rest.take(at + 1) + clean + rest.drop(at + 1)
         }
-        val playlistId = collectionKey?.toLongOrNull()
-        if (playlistId != null) library.replaceTracks(playlistId, playlistTracks.value[playlistId].orEmpty().withClean())
-        if (favorites.value.any { it.isrc == song.isrc } && favorites.value.none { it.isrc == clean.isrc }) {
-            val order = favorites.value.withClean()
-            library.addFavorite(clean, System.currentTimeMillis()); library.setFavoriteOrder(order)
+        val playlistIds = (listOfNotNull(collectionKey?.toLongOrNull()) +
+            playlistTracks.value.filter { (_, list) -> old != null && list.any { it.isrc == old.isrc } }.keys).distinct()
+        for (id in playlistIds) library.replaceTracks(id, playlistTracks.value[id].orEmpty().withClean())
+        val favs = favorites.value
+        if (old != null && favs.any { it.isrc == old.isrc }) {
+            library.addFavorite(clean, System.currentTimeMillis())
+            library.setFavoriteOrder(favs.withClean())
+            library.toggleFavorite(old)
+        } else if (favs.any { it.isrc == song.isrc } && favs.none { it.isrc == clean.isrc }) {
+            library.addFavorite(clean, System.currentTimeMillis()); library.setFavoriteOrder(favs.withClean())
         }
         val queue = player.queue.value
-        val at = queue.tracks.indexOfFirst { it.isrc == song.isrc }
-        if (at >= 0 && queue.tracks.none { it.isrc == clean.isrc }) player.addToQueue(clean, playNext = at == queue.currentIndex)
+        val oldAt = old?.let { o -> queue.tracks.indexOfFirst { it.isrc == o.isrc } } ?: -1
+        if (oldAt >= 0 && oldAt != queue.currentIndex) player.removeFromQueue(oldAt)
+        val at = player.queue.value.tracks.indexOfFirst { it.isrc == song.isrc }
+        if ((at >= 0 || oldAt >= 0) && player.queue.value.tracks.none { it.isrc == clean.isrc }) player.addToQueue(clean, playNext = at == queue.currentIndex || oldAt == queue.currentIndex)
         val name = song.title.substringBefore(" (")
-        _messages.emit("Added a clean version of $name. Both versions are saved.")
+        _messages.emit(if (old != null) "Changed the clean source of $name" else "Added a clean version of $name. Both versions are saved.")
     }
     fun download(track: Track) { downloads.download(listOf(track)); _messages.tryEmit("Downloading ${track.title}") }
 }

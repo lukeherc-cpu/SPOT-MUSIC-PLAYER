@@ -403,13 +403,18 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Album, "Go to album") { actions = null; fullPlayer = false; vm.openAlbum(song) }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Person, "Go to artist") { artistTrack = song; actions = null }
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
-                if (song.isExplicit == true && song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.SwapHoriz, "Make a clean version") { vm.makeCleanVersion(song, detail?.key); actions = null }
+                val cleanOriginal = vm.cleanOriginal(song)
+                if (cleanOriginal != null) MenuRow(Icons.Outlined.SwapHoriz, "Change clean source") { vm.changeCleanSource(cleanOriginal, detail?.key); actions = null }
+                else if (song.isExplicit == true && song.source != TrackSource.PODCAST) {
+                    if (vm.hasCleanVersion(song)) MenuRow(Icons.Outlined.SwapHoriz, "Change clean source") { vm.changeCleanSource(song, detail?.key); actions = null }
+                    else MenuRow(Icons.Outlined.SwapHoriz, "Make a clean version") { vm.makeCleanVersion(song, detail?.key); actions = null }
+                }
             }
         } }
         cleanChoices?.let { choice -> ModalBottomSheet(onDismissRequest = vm::dismissCleanChoices, containerColor = Color(0xFF222222)) {
             LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
-                item { SHeading("Pick a clean version") }
-                item { Text("YouTube uploads of ${choice.song.title}. Tap one to add it next to the explicit version, or tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
+                item { SHeading("Pick a clean source") }
+                item { Text("YouTube uploads of ${choice.song.title}. Tap one to use it as the clean version (it replaces the current one), or tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
                 if (choice.loading) item { DiscoverySkeleton() }
                 else if (choice.videos.isEmpty()) item { Text("No YouTube uploads found. Try the YouTube filter in Search.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 items(choice.videos, key = { "clean-${it.videoId}" }) { video ->

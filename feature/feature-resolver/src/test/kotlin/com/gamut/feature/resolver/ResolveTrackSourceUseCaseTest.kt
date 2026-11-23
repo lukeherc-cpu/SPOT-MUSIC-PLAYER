@@ -26,4 +26,40 @@ class ResolveTrackSourceUseCaseTest {
         assertEquals(ResolutionMethod.DIRECT, result.resolutionMethod)
         assertEquals(result, saved)
     }
+
+    private fun candidate(id: String, title: String) = YoutubeCandidate(id, title, "Artist - Topic", true, 200_000, 1000, "songs", isMusicCatalog = true)
+
+    private fun memory(initial: ResolvedSource? = null) = object : ResolvedSourceRepository {
+        var stored = initial
+        override suspend fun getLocal(isrc: String): ResolvedSource? = stored
+        override suspend fun getRemote(isrc: String): ResolvedSource? = null
+        override suspend fun saveLocal(source: ResolvedSource) { stored = source }
+        override suspend fun submitRemote(source: ResolvedSource) {}
+    }
+
+    @Test fun cleanReleasePlaysTheUnbadgedSong() = runTest {
+        val candidates = object : YoutubeCandidateRepository {
+            override suspend fun songs(track: Track) = listOf(candidate("EEEEEEEEEEE", "Good Song"))
+            override suspend fun broad(track: Track) = emptyList<YoutubeCandidate>()
+            override suspend fun cleanSongs(track: Track) = listOf(candidate("CCCCCCCCCCC", "Good Song"))
+        }
+        val track = Track("spotify:clean", title = "Good Song", artist = "Artist", durationMs = 200_000, source = TrackSource.SPOTIFY, isExplicit = false)
+        val result = ResolveTrackSourceUseCase(memory(), candidates, CandidateScorer(), backgroundScope)(track).getOrThrow()
+        assertEquals("CCCCCCCCCCC", result.youtubeVideoId)
+    }
+
+    @Test fun cleanReleaseResolvedEarlierIsRecheckedOnce() = runTest {
+        var cleanSearches = 0
+        val candidates = object : YoutubeCandidateRepository {
+            override suspend fun songs(track: Track) = emptyList<YoutubeCandidate>()
+            override suspend fun broad(track: Track) = emptyList<YoutubeCandidate>()
+            override suspend fun cleanSongs(track: Track): List<YoutubeCandidate> { cleanSearches++; return listOf(candidate("CCCCCCCCCCC", "Good Song")) }
+        }
+        val sources = memory(ResolvedSource("spotify:clean", "EEEEEEEEEEE", ResolutionMethod.TOPIC_CHANNEL, 0.9f, 0))
+        val track = Track("spotify:clean", title = "Good Song", artist = "Artist", durationMs = 200_000, source = TrackSource.SPOTIFY, isExplicit = false)
+        val resolve = ResolveTrackSourceUseCase(sources, candidates, CandidateScorer(), backgroundScope)
+        assertEquals("CCCCCCCCCCC", resolve(track).getOrThrow().youtubeVideoId)
+        assertEquals("CCCCCCCCCCC", resolve(track).getOrThrow().youtubeVideoId)
+        assertEquals(1, cleanSearches)
+    }
 }

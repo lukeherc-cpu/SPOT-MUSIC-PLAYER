@@ -25,11 +25,20 @@ sealed class ResolveFailure(message: String, cause: Throwable? = null) : Excepti
 interface YoutubeCandidateRepository {
     suspend fun songs(track: Track): List<YoutubeCandidate>
     suspend fun broad(track: Track): List<YoutubeCandidate>
+
+    /** YouTube Music songs without the explicit badge, for clean releases. */
+    suspend fun cleanSongs(track: Track): List<YoutubeCandidate> = emptyList()
 }
 
 class YoutubeCandidateRepositoryImpl @Inject constructor(private val source: YoutubeMusicSearchSource) : YoutubeCandidateRepository {
     override suspend fun songs(track: Track) = source.searchSongs("${track.artist} ${track.title}")
     override suspend fun broad(track: Track) = source.searchBroad("${track.artist} ${track.title}")
+    override suspend fun cleanSongs(track: Track): List<YoutubeCandidate> {
+        val title = track.title.replace(Regex("\\s*[(\\[][^)\\]]*\\b(clean|radio edit|edited)\\b[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE), "").trim()
+        return com.gamut.core.network.YoutubeMusicSongs.search("${track.artist} $title")
+            .filter { !it.explicit }
+            .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = true, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
+    }
 }
 
 interface AudioSourceRepository {
@@ -121,8 +130,16 @@ class ResolveTrackSourceUseCase @Inject constructor(
 
     private suspend fun resolveOrThrow(track: Track): ResolvedSource {
         val resolutionKey = track.resolutionKey()
-        sources.getLocal(resolutionKey)?.let { return it }
         val youtubeVideoId = track.youtubeVideoId
+        val wantsClean = track.isExplicit == false && track.source != TrackSource.PODCAST && track.source != TrackSource.YOUTUBE && youtubeVideoId == null
+        val cached = sources.getLocal(resolutionKey)
+        if (cached != null) {
+            if (!wantsClean || cached.verifiedCount == CLEAN_CHECKED || cached.resolutionMethod == ResolutionMethod.MANUAL) return cached
+            // Resolved before clean releases were matched to YouTube Music's unbadged song; check once.
+            val clean = cleanSource(track, resolutionKey, cached) ?: cached.copy(verifiedCount = CLEAN_CHECKED).also { sources.saveLocal(it) }
+            return clean
+        }
+        if (wantsClean) cleanSource(track, resolutionKey)?.let { return it }
         if (track.source != TrackSource.PODCAST && youtubeVideoId != null && com.gamut.core.network.isValidYoutubeVideoId(youtubeVideoId)) {
             val direct = ResolvedSource(resolutionKey, youtubeVideoId, if (track.source == TrackSource.YOUTUBE) ResolutionMethod.DIRECT else ResolutionMethod.HARD_FILTER, 1.0f, 0)
             sources.saveLocal(direct)
@@ -166,6 +183,20 @@ class ResolveTrackSourceUseCase @Inject constructor(
         return result
     }
 
+    /** A clean release plays YouTube Music's song without the explicit badge, so the audio is clean. */
+    private suspend fun cleanSource(track: Track, resolutionKey: String, cached: ResolvedSource? = null): ResolvedSource? {
+        val pool = try {
+            withTimeoutOrNull(SEARCH_TIMEOUT_MS) { candidates.cleanSongs(track) }.orEmpty()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (cached != null && pool.any { it.videoId == cached.youtubeVideoId }) return cached.copy(verifiedCount = CLEAN_CHECKED).also { sources.saveLocal(it) }
+        val best = scorer.selectBest(pool, track)?.takeIf { it.confidenceScore >= CandidateScorer.ACCEPT } ?: return null
+        return best.copy(isrc = resolutionKey, verifiedCount = CLEAN_CHECKED).also { sources.saveLocal(it) }
+    }
+
     private fun strictBroadOk(candidate: YoutubeCandidate, track: Track): Boolean {
         val artist = com.gamut.core.common.TextMatch.toks(track.artist)
         val candidateText = com.gamut.core.common.TextMatch.toks(candidate.title + " " + candidate.channelName)
@@ -179,6 +210,7 @@ class ResolveTrackSourceUseCase @Inject constructor(
         const val SEARCH_TIMEOUT_MS = 8_000L
         const val BROAD_TIMEOUT_MS = 6_000L
         const val REMOTE_LOOKUP_TIMEOUT_MS = 1_500L
+        const val CLEAN_CHECKED = 1
     }
 }
 

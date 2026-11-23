@@ -1,4 +1,4 @@
-package com.gamut.spot
+package com.gamut.core.network
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*

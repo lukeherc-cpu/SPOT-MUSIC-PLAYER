@@ -1,4 +1,4 @@
-package com.gamut.spot
+package com.gamut.core.network
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
