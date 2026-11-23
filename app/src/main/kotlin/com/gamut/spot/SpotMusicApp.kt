@@ -405,7 +405,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                 if (song.source != TrackSource.PODCAST) MenuRow(Icons.Outlined.Download, "Download") { vm.download(song); actions = null }
                 val cleanOriginal = vm.cleanOriginal(song)
                 if (cleanOriginal != null) MenuRow(Icons.Outlined.SwapHoriz, "Replace audio source") { vm.changeCleanSource(cleanOriginal, detail?.key); actions = null }
-                else if (song.isExplicit == false && song.source != TrackSource.PODCAST && song.source != TrackSource.YOUTUBE) MenuRow(Icons.Outlined.SwapHoriz, "Replace audio source") { vm.replaceAudioSource(song); actions = null }
+                else if (song.isExplicit != true && song.source != TrackSource.PODCAST && song.source != TrackSource.YOUTUBE) MenuRow(Icons.Outlined.SwapHoriz, "Replace audio source") { vm.replaceAudioSource(song); actions = null }
                 else if (song.isExplicit == true && song.source != TrackSource.PODCAST) {
                     if (vm.hasCleanVersion(song)) MenuRow(Icons.Outlined.SwapHoriz, "Change clean source") { vm.changeCleanSource(song, detail?.key); actions = null }
                     else MenuRow(Icons.Outlined.SwapHoriz, "Make a clean version") { vm.makeCleanVersion(song, detail?.key); actions = null }

@@ -200,6 +200,12 @@ class SpotViewModel @Inject constructor(
         val after = songs.map { it.isrc }.toSet()
         val added = songs.filter { it.isrc !in before }
         added.forEach { trackDao.upsert(it.toEntity()) }
+        // Songs imported earlier pick up Spotify's explicit flag, so clean ones get clean audio and their menu options.
+        val stored = songs.map { it.isrc }.chunked(500).flatMap { trackDao.getByIsrcs(it) }.associateBy { it.isrc }
+        for (song in songs) {
+            val old = stored[song.isrc]?.toDomain() ?: continue
+            if (song.isExplicit != null && old.isExplicit != song.isExplicit) trackDao.upsert(old.copy(isExplicit = song.isExplicit).toEntity())
+        }
         if (added.isNotEmpty() || (before - after).isNotEmpty() || before.size != after.size) library.replaceTracks(existing, songs)
         return Synced(existing, added.size, (before - after).size, fresh = false)
     }
