@@ -172,7 +172,7 @@ private fun RightArtistTabs(labels: List<String>, selected: Int, position: Float
             fun choose(y: Float) { val at = y.coerceIn(0f, height.toFloat()); dragY = at; scrubTo(at / height * labels.size) }
             detectDragGestures(onDragStart = { choose(it.y) }, onDragEnd = { dragY = null; scrubTo(null) }, onDragCancel = { dragY = null; scrubTo(null) }) { change, _ -> change.consume(); choose(change.position.y) }
         }) {
-        Box(Modifier.align(Alignment.TopEnd).width(3.dp).height(28.dp).offset { IntOffset(0, (indicator.coerceIn(14.dp.toPx(), height - 14.dp.toPx()) - 14.dp.roundToPx()).toInt()) }.background(Green, CircleShape))
+        Box(Modifier.align(Alignment.TopEnd).width(3.dp).height(28.dp).offset { val half = 14.dp.toPx(); IntOffset(0, (maxOf(half, minOf(indicator, height - half)) - half).toInt()) }.background(Green, CircleShape))
         Column(Modifier.fillMaxSize()) {
         labels.forEachIndexed { index, label ->
             val color by animateColorAsState(if (selected == index) Color.White else Muted.copy(alpha = .65f), tween(160), label = "artist section color")
