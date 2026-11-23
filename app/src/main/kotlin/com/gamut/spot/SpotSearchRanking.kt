@@ -57,16 +57,22 @@ internal object SearchRanking {
         val mood = isMood(query)
         val sameTitleSongs = tracks.count { bare(plain(it.title)) == bare(query) }
         fun best(titles: List<String>, bonus: Int) = titles.take(5).mapIndexed { i, title -> match(query, title) + bonus - i }.maxOrNull() ?: 0
+        // The artist outranks their own songs: a search that names them shows them first.
+        val artistScore = artists.take(3).mapIndexed { i, artist ->
+            val owns = tracks.take(6).count { fold(it.artist.substringBefore(',')) == fold(artist.title) } >= 2
+            val named = artistMatch(query, artist.title)
+            named + 10 - i + if (owns && named >= 85) 25 else 0
+        }.maxOrNull() ?: 0
+        // "artist song" or "song artist" names one song exactly.
+        val artistAndTitle = tracks.take(5).mapIndexed { i, t ->
+            val a = t.artist.substringBefore(','); val p = plain(t.title)
+            if (bare("$a $p") == bare(query) || bare("$p $a") == bare(query)) 108 - i else 0
+        }.maxOrNull() ?: 0
+        val songScore = maxOf(best(tracks.map { plain(it.title) }, 8), artistAndTitle) - if (sameTitleSongs >= 3) 20 else 0
         val scores = mutableMapOf(
             Section.Podcasts to best(shows.map { it.title }, 12),
-            Section.Artists to artists.take(3).mapIndexed { i, artist ->
-                // The artist outranks their own songs: a search that names them shows them first.
-                val owns = tracks.take(6).count { fold(it.artist.substringBefore(',')) == fold(artist.title) } >= 2
-                val named = artistMatch(query, artist.title)
-                named + 10 - i + if (owns && named >= 85) 25 else 0
-            }.maxOrNull() ?: 0,
-            Section.Songs to maxOf(best(tracks.map { plain(it.title) }, 8),
-                tracks.take(5).mapIndexed { i, t -> val a = t.artist.substringBefore(','); val p = plain(t.title); if (bare("$a $p") == bare(query) || bare("$p $a") == bare(query)) 108 - i else 0 }.maxOrNull() ?: 0) - if (sameTitleSongs >= 3) 20 else 0,
+            Section.Artists to artistScore,
+            Section.Songs to songScore,
             Section.Albums to best(albums.map { it.title }, 4),
             Section.Playlists to best(playlists.map { it.title }, 2),
         )
