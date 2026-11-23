@@ -22,6 +22,18 @@ import javax.inject.Inject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+/** Last play time and play count, keyed "t:" song id, "c:" playlist or collection key, "s:" podcast title. */
+data class ListeningStats(val last: Map<String, Long> = emptyMap(), val counts: Map<String, Int> = emptyMap()) {
+    fun songLast(isrc: String) = last["t:$isrc"] ?: 0L
+    fun songCount(isrc: String) = counts["t:$isrc"] ?: 0
+    fun collectionLast(key: String, tracks: List<Track>) = maxOf(last["c:$key"] ?: 0L, tracks.maxOfOrNull { songLast(it.isrc) } ?: 0L)
+    fun collectionCount(key: String, tracks: List<Track>) = (counts["c:$key"] ?: 0) + tracks.sumOf { songCount(it.isrc) }
+    fun showLast(title: String) = last["s:" + title.lowercase()] ?: 0L
+    fun showCount(title: String) = counts["s:" + title.lowercase()] ?: 0
+}
+
+enum class LibrarySort(val label: String) { Recent("Recently played"), MostPlayed("Most listened"), Alphabetical("Alphabetical") }
+
 data class MusicRail(val title: String, val cards: List<SpotifyCard>)
 data class HomeEpisode(val show: PodcastShow, val episode: PodcastEpisode)
 data class SpotHome(val mixes: List<DailyMix> = emptyList(), val personal: List<DailyMix> = emptyList(), val newEpisodes: List<HomeEpisode> = emptyList(), val rails: List<MusicRail> = emptyList(), val songs: List<Track> = emptyList(), val shows: List<PodcastShow> = emptyList(), val podcastReason: String = "", val episodes: List<HomeEpisode> = emptyList(), val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val podcastsLoading: Boolean = true, val videosLoading: Boolean = true, val error: String? = null)
@@ -78,6 +90,32 @@ class SpotViewModel @Inject constructor(
     val playlistTracks = playlists.flatMapLatest { list ->
         if (list.isEmpty()) flowOf(emptyMap()) else combine(list.map { p -> library.observeTracks(p.id).map { p.id to it } }) { it.toMap() }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    /** Songs saved on the device, by id, for the filled download icon on playlists. */
+    val downloadedIds = downloadIndex.downloads.map { it.keys }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    fun isDownloaded(tracks: List<Track>, saved: Set<String>) = tracks.isNotEmpty() && tracks.all { it.isrc in saved }
+    // When songs, playlists and shows were last played and how often, for sorting Your Library.
+    private val listenPrefs by lazy { appContext.getSharedPreferences("cadence_listening", android.content.Context.MODE_PRIVATE) }
+    private val _listening = MutableStateFlow(ListeningStats())
+    val listening = _listening.asStateFlow()
+    private fun loadListening() = viewModelScope.launch(Dispatchers.IO) {
+        val last = HashMap<String, Long>(); val counts = HashMap<String, Int>()
+        listenPrefs.all.forEach { (k, v) -> val parts = (v as? String)?.split(',') ?: return@forEach; parts.getOrNull(0)?.toLongOrNull()?.let { last[k] = it }; parts.getOrNull(1)?.toIntOrNull()?.let { counts[k] = it } }
+        plays.all.forEach { (k, v) -> (v as? Int)?.let { counts["t:$k"] = maxOf(counts["t:$k"] ?: 0, it) } }
+        _listening.value = ListeningStats(last, counts)
+    }
+    private fun recordListen(track: Track) {
+        val now = System.currentTimeMillis()
+        val keys = listOfNotNull("t:${track.isrc}", _playContext.value?.let { "c:$it" }, track.album?.takeIf { track.source == TrackSource.PODCAST }?.let { "s:" + it.lowercase() })
+        val stats = _listening.value
+        val last = stats.last.toMutableMap(); val counts = stats.counts.toMutableMap()
+        val editor = listenPrefs.edit()
+        keys.forEach { key -> last[key] = now; counts[key] = (counts[key] ?: 0) + 1; editor.putString(key, "$now,${counts[key]}") }
+        // Keep the store small: drop the oldest entries past 3,000.
+        val all = listenPrefs.all
+        if (all.size > 3000) all.keys.sortedBy { (all[it] as? String)?.substringBefore(',')?.toLongOrNull() ?: 0 }.take(all.size - 3000).forEach { editor.remove(it) }
+        editor.apply()
+        _listening.value = ListeningStats(last, counts)
+    }
     val downloadedTracks = downloadIndex.downloads.mapLatest { saved -> saved.keys.toList().chunked(400).flatMap { trackDao.getByIsrcs(it) }.map { it.toDomain() } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val recents = recentRepository.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -134,8 +172,44 @@ class SpotViewModel @Inject constructor(
     private var detailJob: Job? = null
     private var homeJob: Job? = null
     private var playJob: Job? = null
-    private val imported = mutableSetOf<String>()
+    // Spotify collections already imported, by Spotify uri, mapped to the local playlist. Kept on the device,
+    // so importing the same collection again only applies what changed instead of making a second copy.
+    private val importPrefs by lazy { appContext.getSharedPreferences("cadence_imports", android.content.Context.MODE_PRIVATE) }
+    private val _imports = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val imports = _imports.asStateFlow()
+    private fun loadImports() = viewModelScope.launch(Dispatchers.IO) {
+        _imports.value = importPrefs.all.mapNotNull { (k, v) -> (v as? Long)?.let { k to it } }.toMap()
+    }
+    private data class Synced(val id: Long, val added: Int, val removed: Int, val fresh: Boolean)
+    /** Saves a fetched Spotify collection: a new playlist the first time, afterwards only the songs that changed. */
+    private suspend fun saveCollection(uri: String, collection: SpotifyCollection, artwork: String?): Synced {
+        val songs = collection.tracks.distinctBy { it.isrc }
+        // Playlists imported before this was remembered are matched by name, so they aren't copied a second time.
+        val existing = _imports.value[uri]?.takeIf { id -> playlists.value.any { it.id == id } }
+            ?: playlists.value.firstOrNull { p -> p.name == collection.title && p.id !in _imports.value.values }?.id?.also { id ->
+                withContext(Dispatchers.IO) { importPrefs.edit().putLong(uri, id).apply() }; _imports.update { it + (uri to id) }
+            }
+        if (existing == null) {
+            val id = library.importPlaylist(collection.title, collection.artwork ?: artwork, songs)
+            withContext(Dispatchers.IO) { importPrefs.edit().putLong(uri, id).apply() }
+            _imports.update { it + (uri to id) }
+            return Synced(id, songs.size, 0, fresh = true)
+        }
+        val before = library.observeTracks(existing).first().map { it.isrc }.toSet()
+        val after = songs.map { it.isrc }.toSet()
+        val added = songs.filter { it.isrc !in before }
+        added.forEach { trackDao.upsert(it.toEntity()) }
+        if (added.isNotEmpty() || (before - after).isNotEmpty() || before.size != after.size) library.replaceTracks(existing, songs)
+        return Synced(existing, added.size, (before - after).size, fresh = false)
+    }
+    private fun Synced.summary(title: String) = when {
+        fresh -> "Imported $added songs"
+        added == 0 && removed == 0 -> "$title is up to date"
+        else -> "Synced $title: " + listOfNotNull("$added added".takeIf { added > 0 }, "$removed removed".takeIf { removed > 0 }).joinToString(", ")
+    }
     init {
+        loadListening()
+        loadImports()
         viewModelScope.launch {
             combine(recents, favorites, followedShows) { history, saved, shows -> SpotDiscovery.fingerprint(history, saved) + history.filter { it.source == TrackSource.PODCAST }.take(15).joinToString { it.isrc } + shows.joinToString { it.feedUrl } }
                 .distinctUntilChanged().debounce(800).collect { refreshHome() }
@@ -146,7 +220,7 @@ class SpotViewModel @Inject constructor(
                 when (state) {
                     is PlaybackState.Playing -> {
                         if (_opening.value?.isrc == state.track.isrc) _opening.value = null
-                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); lastId = state.track.isrc; preloadWords(state.track) }
+                        if (lastId != state.track.isrc) { recentRepository.record(state.track); countPlay(state.track); recordListen(state.track); lastId = state.track.isrc; preloadWords(state.track) }
                     }
                     is PlaybackState.Error -> { _opening.value = null; _messages.tryEmit(state.message) }
                     else -> Unit
@@ -499,16 +573,15 @@ class SpotViewModel @Inject constructor(
                 val collection = catalog.collection(link)
                 require(collection.tracks.isNotEmpty()) { "This collection has no available music to import" }
                 // Fetch every page first, then commit the complete local collection atomically.
-                val id = library.importPlaylist(collection.title, collection.artwork, collection.tracks)
-                imported += collection.uri
-                _messages.emit("Imported ${collection.tracks.distinctBy { it.isrc }.size} songs${if (collection.skipped > 0) " · ${collection.skipped} unavailable items skipped" else ""}")
-                delay(100); openPlaylist(id.toString())
+                val synced = saveCollection(collection.uri, collection, null)
+                _messages.emit(synced.summary(collection.title) + if (collection.skipped > 0) " · ${collection.skipped} unavailable items skipped" else "")
+                delay(100); openPlaylist(synced.id.toString())
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { _messages.emit(e.message ?: "Spotify import failed. Check that the playlist is public.") }
             finally { _importing.value = false }
         }
     }
-    fun isImported(uri: String) = uri in imported
+    fun isImported(uri: String) = uri in _imports.value
 
     /** Called by the sign-in page once Spotify has signed the listener in. */
     fun signInSpotify(cookie: String) {
@@ -547,25 +620,35 @@ class SpotViewModel @Inject constructor(
             }
         }
     }
-    /** Imports the chosen playlists and mixes one at a time, each saved complete or not at all. */
+    /** Re-checks every collection imported before and applies only what changed. */
+    fun resyncSpotify() {
+        val account = _account.value
+        val known = (account.playlists + account.mixes).filter { it.uri in _imports.value }
+        importSpotifyCards(known)
+    }
+    /** Imports the chosen playlists and mixes one at a time, each saved complete or not at all. Ones imported before only get their changes. */
     fun importSpotifyCards(cards: List<SpotifyCard>) {
         if (cards.isEmpty() || _account.value.progress != null) return
         accountJob?.cancel()
         accountJob = viewModelScope.launch {
-            var done = 0; var failed = 0; var songs = 0
+            var done = 0; var failed = 0; var songs = 0; var synced = 0; var added = 0; var removed = 0
             try {
                 cards.forEachIndexed { index, card ->
-                    _account.update { it.copy(progress = "Importing ${index + 1} of ${cards.size}: ${card.title}") }
+                    _account.update { it.copy(progress = (if (card.uri in _imports.value) "Syncing" else "Importing") + " ${index + 1} of ${cards.size}: ${card.title}") }
                     try {
                         val collection = catalog.collection(card.uri)
                         if (collection.tracks.isEmpty()) { failed++; return@forEachIndexed }
-                        library.importPlaylist(collection.title, collection.artwork ?: card.artwork, collection.tracks)
-                        imported += card.uri; done++; songs += collection.tracks.distinctBy { it.isrc }.size
+                        val result = saveCollection(card.uri, collection, card.artwork)
+                        if (result.fresh) { done++; songs += result.added } else { synced++; added += result.added; removed += result.removed }
                     } catch (e: CancellationException) { throw e } catch (_: Exception) { failed++ }
                 }
             } finally {
                 _account.update { it.copy(progress = null) }
-                if (done > 0 || failed > 0) _messages.tryEmit("Imported $done ${if (done == 1) "collection" else "collections"} · $songs songs" + if (failed > 0) " · $failed couldn't be imported" else "")
+                val parts = listOfNotNull(
+                    "Imported $done ${if (done == 1) "collection" else "collections"} · $songs songs".takeIf { done > 0 },
+                    "Synced $synced · ${if (added == 0 && removed == 0) "no changes" else "$added added, $removed removed"}".takeIf { synced > 0 },
+                    "$failed couldn't be loaded".takeIf { failed > 0 })
+                if (parts.isNotEmpty()) _messages.tryEmit(parts.joinToString(" · "))
             }
         }
     }

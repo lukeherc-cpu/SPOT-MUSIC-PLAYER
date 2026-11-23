@@ -85,6 +85,10 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     var searchFilter by rememberSaveable { mutableStateOf("All") }
     if (searchFilter !in SEARCH_FILTERS) searchFilter = "All"
     var libraryGrid by rememberSaveable { mutableStateOf(false) }
+    var librarySort by rememberSaveable { mutableStateOf(LibrarySort.Recent) }
+    var sortMenu by remember { mutableStateOf(false) }
+    val listening by vm.listening.collectAsState()
+    val downloadedIds by vm.downloadedIds.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -302,32 +306,58 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(listOf("All", "Playlists", "Podcasts", "Downloads")) { filter -> SChip(filter, libraryFilter == filter) { libraryFilter = filter } }
                         }
-                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Sort, null, Modifier.size(20.dp)); Text("Your collection", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Change sort order") { sortMenu = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.Sort, null, Modifier.size(20.dp)); Text(librarySort.label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
+                                }
+                                DropdownMenu(sortMenu, onDismissRequest = { sortMenu = false }) {
+                                    LibrarySort.entries.forEach { option ->
+                                        DropdownMenuItem(text = { Text(option.label, color = if (option == librarySort) Green else Color.White) }, onClick = { librarySort = option; sortMenu = false },
+                                            trailingIcon = { if (option == librarySort) Icon(Icons.Filled.Check, null, tint = Green) })
+                                    }
+                                }
+                            }
                             SIcon(if (libraryGrid) Icons.Outlined.ViewList else Icons.Outlined.GridView, "Change library layout", onClick = { libraryGrid = !libraryGrid })
                         }
+                        // Sorted by the chosen order: recently played, most listened, or A to Z. Liked Songs stays on top.
+                        val sortedPlaylists = remember(playlists, playlistTracks, listening, librarySort) { when (librarySort) {
+                            LibrarySort.Recent -> playlists.sortedByDescending { listening.collectionLast(it.id.toString(), playlistTracks[it.id].orEmpty()) }
+                            LibrarySort.MostPlayed -> playlists.sortedByDescending { listening.collectionCount(it.id.toString(), playlistTracks[it.id].orEmpty()) }
+                            LibrarySort.Alphabetical -> playlists.sortedBy { it.name.lowercase() }
+                        } }
+                        val sortedShows = remember(follows, listening, librarySort) { when (librarySort) {
+                            LibrarySort.Recent -> follows.sortedByDescending { listening.showLast(it.title) }
+                            LibrarySort.MostPlayed -> follows.sortedByDescending { listening.showCount(it.title) }
+                            LibrarySort.Alphabetical -> follows.sortedBy { it.title.lowercase() }
+                        } }
+                        val sortedDownloads = remember(downloadedTracks, listening, librarySort) { when (librarySort) {
+                            LibrarySort.Recent -> downloadedTracks.sortedByDescending { listening.songLast(it.isrc) }
+                            LibrarySort.MostPlayed -> downloadedTracks.sortedByDescending { listening.songCount(it.isrc) }
+                            LibrarySort.Alphabetical -> downloadedTracks.sortedBy { it.title.lowercase() }
+                        } }
                         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                             if (libraryFilter in listOf("All", "Playlists")) {
-                                item { SLibraryRow("Liked Songs", "Playlist · ${favorites.size} songs", null, liked = true) { vm.openPlaylist("liked") } }
+                                item { SLibraryRow("Liked Songs", "Playlist · ${favorites.size} songs", null, liked = true, downloaded = vm.isDownloaded(favorites, downloadedIds)) { vm.openPlaylist("liked") } }
                                 if (libraryGrid) {
-                                    items(playlists.chunked(2)) { pair -> Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    items(sortedPlaylists.chunked(2)) { pair -> Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         pair.forEach { playlist -> Column(Modifier.weight(1f).clickable { vm.openPlaylist(playlist.id.toString()) }) {
                                             SArt(playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f))
                                             Text(playlist.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         } }
                                         if (pair.size == 1) Spacer(Modifier.weight(1f))
                                     } }
-                                } else items(playlists, key = { "library-${it.id}" }) { playlist -> SLibraryRow(playlist.name, "Playlist · ${playlistTracks[playlist.id]?.size ?: 0} songs", playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl) { vm.openPlaylist(playlist.id.toString()) } }
+                                } else items(sortedPlaylists, key = { "library-${it.id}" }) { playlist -> SLibraryRow(playlist.name, "Playlist · ${playlistTracks[playlist.id]?.size ?: 0} songs", playlist.coverUri ?: playlistTracks[playlist.id]?.firstOrNull()?.albumArtUrl, downloaded = vm.isDownloaded(playlistTracks[playlist.id].orEmpty(), downloadedIds)) { vm.openPlaylist(playlist.id.toString()) } }
                             }
                             if (libraryFilter in listOf("All", "Podcasts")) {
-                                if (follows.isNotEmpty()) items(follows, key = { "follow-${it.feedUrl}" }) { show -> Box {
+                                if (follows.isNotEmpty()) items(sortedShows, key = { "follow-${it.feedUrl}" }) { show -> Box {
                                     SLibraryRow(show.title, if (show.feedUrl in newShows) "New episode · ${show.author}" else "Podcast · ${show.author}", show.artwork) { vm.openShow(show) }
                                     if (show.feedUrl in newShows) NewDot(Modifier.align(Alignment.CenterEnd).padding(end = 20.dp))
                                 } }
                                 else item { TextButton(onClick = { searchFilter = "Podcasts"; navigate(Page.Search); vm.search("popular podcasts") }, modifier = Modifier.padding(8.dp)) { Text("Find podcasts to follow", color = Color.White) } }
                             }
                             if (libraryFilter == "Downloads") {
-                                val saved = downloadedTracks
+                                val saved = sortedDownloads
                                 if (saved.isEmpty()) item { Text("Songs you download will appear here.", color = Muted, modifier = Modifier.padding(24.dp)) }
                                 items(saved, key = { it.isrc }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { vm.play(song, saved) }, onMore = { actions = song }) }
                             }
