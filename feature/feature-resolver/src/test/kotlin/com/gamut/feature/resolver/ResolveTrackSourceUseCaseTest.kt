@@ -41,7 +41,7 @@ class ResolveTrackSourceUseCaseTest {
         val candidates = object : YoutubeCandidateRepository {
             override suspend fun songs(track: Track) = listOf(candidate("EEEEEEEEEEE", "Good Song"))
             override suspend fun broad(track: Track) = emptyList<YoutubeCandidate>()
-            override suspend fun cleanSongs(track: Track) = listOf(candidate("CCCCCCCCCCC", "Good Song"))
+            override suspend fun cleanLookup(track: Track) = CleanLookup(listOf(candidate("CCCCCCCCCCC", "Good Song")), setOf("EEEEEEEEEEE"))
         }
         val track = Track("spotify:clean", title = "Good Song", artist = "Artist", durationMs = 200_000, source = TrackSource.SPOTIFY, isExplicit = false)
         val result = ResolveTrackSourceUseCase(memory(), candidates, CandidateScorer(), backgroundScope)(track).getOrThrow()
@@ -53,7 +53,7 @@ class ResolveTrackSourceUseCaseTest {
         val candidates = object : YoutubeCandidateRepository {
             override suspend fun songs(track: Track) = emptyList<YoutubeCandidate>()
             override suspend fun broad(track: Track) = emptyList<YoutubeCandidate>()
-            override suspend fun cleanSongs(track: Track): List<YoutubeCandidate> { cleanSearches++; return listOf(candidate("CCCCCCCCCCC", "Good Song")) }
+            override suspend fun cleanLookup(track: Track): CleanLookup { cleanSearches++; return CleanLookup(listOf(candidate("CCCCCCCCCCC", "Good Song"))) }
         }
         val sources = memory(ResolvedSource("spotify:clean", "EEEEEEEEEEE", ResolutionMethod.TOPIC_CHANNEL, 0.9f, 0))
         val track = Track("spotify:clean", title = "Good Song", artist = "Artist", durationMs = 200_000, source = TrackSource.SPOTIFY, isExplicit = false)
@@ -61,5 +61,29 @@ class ResolveTrackSourceUseCaseTest {
         assertEquals("CCCCCCCCCCC", resolve(track).getOrThrow().youtubeVideoId)
         assertEquals("CCCCCCCCCCC", resolve(track).getOrThrow().youtubeVideoId)
         assertEquals(1, cleanSearches)
+    }
+
+    @Test fun cleanReleaseNeverKeepsTheExplicitMaster() = runTest {
+        val candidates = object : YoutubeCandidateRepository {
+            override suspend fun songs(track: Track) = listOf(candidate("EEEEEEEEEEE", "Good Song"), candidate("OOOOOOOOOOO", "Good Song"))
+            override suspend fun broad(track: Track) = emptyList<YoutubeCandidate>()
+            override suspend fun cleanLookup(track: Track) = CleanLookup(explicitIds = setOf("EEEEEEEEEEE"))
+        }
+        val sources = memory(ResolvedSource("spotify:clean", "EEEEEEEEEEE", ResolutionMethod.TOPIC_CHANNEL, 0.9f, 0))
+        val track = Track("spotify:clean", title = "Good Song", artist = "Artist", durationMs = 200_000, source = TrackSource.SPOTIFY, isExplicit = false)
+        assertEquals("OOOOOOOOOOO", ResolveTrackSourceUseCase(sources, candidates, CandidateScorer(), backgroundScope)(track).getOrThrow().youtubeVideoId)
+    }
+
+    @Test fun replacedSourceWins() = runTest {
+        val candidates = object : YoutubeCandidateRepository {
+            override suspend fun songs(track: Track): List<YoutubeCandidate> = error("Must not search")
+            override suspend fun broad(track: Track): List<YoutubeCandidate> = error("Must not search")
+            override suspend fun cleanLookup(track: Track): CleanLookup = error("Must not search")
+        }
+        val sources = memory()
+        val track = Track("spotify:clean", title = "Good Song", artist = "Artist", durationMs = 200_000, source = TrackSource.SPOTIFY, isExplicit = false)
+        val resolve = ResolveTrackSourceUseCase(sources, candidates, CandidateScorer(), backgroundScope)
+        resolve.replaceSource(track, "MMMMMMMMMMM")
+        assertEquals("MMMMMMMMMMM", resolve(track).getOrThrow().youtubeVideoId)
     }
 }

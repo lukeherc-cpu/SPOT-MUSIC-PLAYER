@@ -53,7 +53,7 @@ internal object CleanMatch {
 }
 
 /** YouTube uploads the listener can pick from when no clean version is found on its own. */
-data class CleanChoices(val song: Track, val collectionKey: String?, val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true)
+data class CleanChoices(val song: Track, val collectionKey: String?, val videos: List<YoutubeCandidate> = emptyList(), val loading: Boolean = true, val replace: Boolean = false)
 
 data class SpotifyAccountState(val signedIn: Boolean = false, val name: String? = null, val loading: Boolean = false, val playlists: List<SpotifyCard> = emptyList(), val mixes: List<SpotifyCard> = emptyList(), val error: String? = null, val progress: String? = null)
 
@@ -82,6 +82,7 @@ class SpotViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val avatars: com.gamut.account.AvatarRepository,
     private val spotifyAccount: SpotifyAccountStore,
+    private val resolveSource: com.gamut.feature.resolver.ResolveTrackSourceUseCase,
 ) : ViewModel() {
     // Plays per song, kept on this device. Used for "Your most listened to" on artist pages.
     private val plays by lazy { appContext.getSharedPreferences("cadence_play_counts", android.content.Context.MODE_PRIVATE) }
@@ -199,6 +200,12 @@ class SpotViewModel @Inject constructor(
         val after = songs.map { it.isrc }.toSet()
         val added = songs.filter { it.isrc !in before }
         added.forEach { trackDao.upsert(it.toEntity()) }
+        // Songs imported earlier pick up Spotify's explicit flag, so clean ones get clean audio and their menu options.
+        val stored = songs.map { it.isrc }.chunked(500).flatMap { trackDao.getByIsrcs(it) }.associateBy { it.isrc }
+        for (song in songs) {
+            val old = stored[song.isrc]?.toDomain() ?: continue
+            if (song.isExplicit != null && old.isExplicit != song.isExplicit) trackDao.upsert(old.copy(isExplicit = song.isExplicit).toEntity())
+        }
         if (added.isNotEmpty() || (before - after).isNotEmpty() || before.size != after.size) library.replaceTracks(existing, songs)
         return Synced(existing, added.size, (before - after).size, fresh = false)
     }
@@ -692,9 +699,13 @@ class SpotViewModel @Inject constructor(
         }
     }
     /** Lists YouTube uploads so the listener can pick a different clean source for [song]. */
-    fun changeCleanSource(song: Track, collectionKey: String?) {
+    fun changeCleanSource(song: Track, collectionKey: String?) = openSourcePicker(CleanChoices(song, collectionKey))
+    /** Lists YouTube uploads so the listener can pick better audio for a clean song. */
+    fun replaceAudioSource(song: Track) = openSourcePicker(CleanChoices(song, null, replace = true))
+    private fun openSourcePicker(start: CleanChoices) {
+        val song = start.song
         cleanJob?.cancel()
-        _cleanChoices.value = CleanChoices(song, collectionKey)
+        _cleanChoices.value = start
         cleanJob = viewModelScope.launch {
             val found = cleanCandidates(song)
             _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(videos = found, loading = false) else it }
@@ -709,7 +720,18 @@ class SpotViewModel @Inject constructor(
         val choice = _cleanChoices.value ?: return
         cleanJob?.cancel()
         _cleanChoices.value = null
-        viewModelScope.launch { applyClean(choice.song, choice.collectionKey, cleanTrack(choice.song, video)) }
+        if (choice.replace) viewModelScope.launch {
+            try {
+                resolveSource.replaceSource(choice.song, video.videoId)
+                // A downloaded copy holds the old audio, so it is downloaded again from the new source.
+                if (downloadIndex.pathFor(choice.song.isrc) != null) { downloads.remove(listOf(choice.song.isrc)); downloads.download(listOf(choice.song)) }
+                // The song now playing restarts with the new audio.
+                val queue = player.queue.value
+                val at = queue.tracks.indexOfFirst { it.isrc == choice.song.isrc }
+                if (at >= 0 && at == queue.currentIndex) player.skipTo(at)
+                _messages.emit("Replaced the audio of ${choice.song.title.substringBefore(" (")}")
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { _messages.emit("Couldn't replace the audio. Try another upload.") }
+        } else viewModelScope.launch { applyClean(choice.song, choice.collectionKey, cleanTrack(choice.song, video)) }
     }
     fun dismissCleanChoices() { cleanJob?.cancel(); _cleanChoices.value = null }
     /** Each song has one clean version: a new one takes the old one's place everywhere it was saved. */
