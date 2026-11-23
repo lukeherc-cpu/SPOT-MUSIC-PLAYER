@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -97,8 +99,9 @@ internal fun PodcastEpisodeCards(episodes: List<HomeEpisode>, vm: SpotViewModel)
 // Music videos play muted inside the card, in the app, instead of opening another site.
 // The card most in view starts on its own, muted. A tap stops it, and a tap on another card plays that one.
 @Composable
-internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Music videos for you") {
+internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Music videos for you", onUnmute: () -> Unit = {}) {
     if (videos.isEmpty()) return
+    var unmuted by remember { mutableStateOf<String?>(null) }
     var chosen by rememberSaveable { mutableStateOf<String?>(null) }
     var stopped by remember { mutableStateOf(emptySet<String>()) }
     val rail = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -116,13 +119,15 @@ internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Mus
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
                     // The thumbnail stays underneath, so the card never shows an empty black box while the video loads.
                     SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
-                    if (on) MutedVideo(video.videoId, Modifier.fillMaxSize(), onTap = { stopped = stopped + video.videoId; chosen = null })
+                    if (on) MutedVideo(video.videoId, Modifier.fillMaxSize(), muted = unmuted != video.videoId,
+                        onToggleMute = { if (unmuted == video.videoId) unmuted = null else { unmuted = video.videoId; chosen = video.videoId; onUnmute() } },
+                        onTap = { stopped = stopped + video.videoId; chosen = null; unmuted = null })
                     else {
                         Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, null, tint = Color.Black) }
                     }
                 }
                 Text(video.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp))
-                Text((if (on) "Playing muted · tap to stop · " else "Plays muted in Cadence · ") + video.channelName, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
+                Text((if (on && unmuted == video.videoId) "Playing · tap to stop · " else if (on) "Playing muted · tap to stop · " else "Plays muted in Cadence · ") + video.channelName, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
             }
         }
     }
@@ -172,7 +177,7 @@ internal fun CategoryRail(title: String, categories: List<BrowseCategory>, artwo
 
 @android.annotation.SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 @Composable
-private fun MutedVideo(videoId: String, modifier: Modifier, onTap: () -> Unit) {
+private fun MutedVideo(videoId: String, modifier: Modifier, muted: Boolean, onToggleMute: () -> Unit, onTap: () -> Unit) {
     val id = videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(11)
     val origin = "https://www.youtube-nocookie.com"
     // The video stays hidden behind its thumbnail until it is actually playing, so YouTube's poster,
@@ -180,12 +185,17 @@ private fun MutedVideo(videoId: String, modifier: Modifier, onTap: () -> Unit) {
     // the player is taller than the card: the video fills the card exactly while YouTube's title bar
     // and logo sit in the cropped-off strips above and below it.
     var playing by remember(id) { mutableStateOf(false) }
+    var web by remember(id) { mutableStateOf<android.webkit.WebView?>(null) }
+    // The video starts muted; the speaker button turns its sound on and off.
+    LaunchedEffect(web, muted, playing) {
+        web?.evaluateJavascript(if (muted) "window.pl&&pl.mute()" else "window.pl&&(pl.unMute(),pl.setVolume(100))", null)
+    }
     val shown by animateFloatAsState(if (playing) 1f else 0f, label = "video")
     val page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;position:relative}
 #p,iframe{position:absolute;left:0;top:-90px;width:100%;height:calc(100% + 180px);border:0;pointer-events:none}
 </style></head><body><div id="p"></div><script>
-function onYouTubeIframeAPIReady(){new YT.Player('p',{host:'$origin',videoId:'$id',playerVars:{autoplay:1,mute:1,playsinline:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,cc_load_policy:0,rel:0,modestbranding:1,loop:1,playlist:'$id'},
+function onYouTubeIframeAPIReady(){window.pl=new YT.Player('p',{host:'$origin',videoId:'$id',playerVars:{autoplay:1,mute:1,playsinline:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,cc_load_policy:0,rel:0,modestbranding:1,loop:1,playlist:'$id'},
 events:{onReady:function(e){e.target.mute();e.target.playVideo()},onStateChange:function(e){if(e.data==1)Cadence.started();else if(e.data==0||e.data==2)e.target.playVideo()}}})}
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
     Box(modifier) {
@@ -205,10 +215,14 @@ events:{onReady:function(e){e.target.mute();e.target.playVideo()},onStateChange:
                     override fun shouldOverrideUrlLoading(view: android.webkit.WebView, request: android.webkit.WebResourceRequest) = request.isForMainFrame
                 }
                 loadDataWithBaseURL("$origin/", page, "text/html", "utf-8", null)
+                web = this
             }
         }, onRelease = { it.stopLoading(); it.loadUrl("about:blank"); it.destroy() })
         // Taps land on the card, never on YouTube's player, so its menus and overlays never open.
         Box(Modifier.matchParentSize().clickable(onClickLabel = "Stop video", onClick = onTap))
+        Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f)).clickable(onClickLabel = if (muted) "Turn sound on" else "Mute", onClick = onToggleMute), contentAlignment = Alignment.Center) {
+            Icon(if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, if (muted) "Sound off" else "Sound on", tint = Color.White, modifier = Modifier.size(22.dp))
+        }
     }
 }
 

@@ -83,9 +83,9 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
     var libraryFilter by rememberSaveable { mutableStateOf("All") }
     var homeFilter by rememberSaveable { mutableStateOf("All") }
     var searchFilter by rememberSaveable { mutableStateOf("All") }
+    if (searchFilter !in SEARCH_FILTERS) searchFilter = "All"
     var libraryGrid by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
-    val cleanProgress by vm.cleanProgress.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -113,7 +113,6 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 Column(Modifier.background(Brush.verticalGradient(listOf(Black.copy(alpha = .94f), Color.Black)))) {
-                    cleanProgress?.let { progress -> CleanProgressBar(progress) }
                     if (track != null) SpotMiniPlayer(track, vm.player, isPlaying, opening != null, track.isrc in favoriteIds,
                         onOpen = { fullPlayer = true }, onSave = { vm.saveToLiked(track); saveTrack = track }, onBounds = { miniBounds = it })
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().height(62.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -191,7 +190,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             home.rails.take(1).forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title, rail.cards, vm::openCard) } }
                             item { CategoryRail("Explore your genres", BrowseCategory.entries.filter { it.genre != null }.shuffled(kotlin.random.Random(home.mixes.firstOrNull()?.id.hashCode() + recent.size)).take(6), home.rails.flatMap { it.cards }.mapNotNull { it.artwork }.distinct(), vm::openBrowse) }
                             home.rails.drop(1).forEach { rail -> item("home-${rail.title}") { SCardRail(rail.title.replace("More like", "Popular with listeners of"), rail.cards, vm::openCard) } }
-                            item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos) }
+                            item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, onUnmute = vm.player::pause) }
                         }
                         if (homeFilter != "Music") {
                             if (home.podcastsLoading) item { RailSkeleton() }
@@ -218,7 +217,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 fun group(value: BrowseGroup) = BrowseCategory.entries.filter { it.group == value }
                                 item { SHeading("Browse all") }
                                 item { CategoryGrid(group(BrowseGroup.Top), artwork = art, podcastArtwork = home.shows.firstOrNull()?.artwork, onCategory = vm::openBrowse, compact = true) }
-                                item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, "Videos you can watch") }
+                                item { if (home.videosLoading) RailSkeleton() else MusicVideoRail(home.videos, "Videos you can watch", onUnmute = vm.player::pause) }
                                 if (home.newEpisodes.isNotEmpty()) item { NewEpisodeRail(home.newEpisodes, newShows, vm) }
                                 else if (home.episodes.isNotEmpty()) item { NewEpisodeRail(home.episodes, emptySet(), vm) }
                                 item { CategoryRail("More for you", group(BrowseGroup.More) + BrowseCategory.NewReleases + BrowseCategory.Charts, art.drop(3), vm::openBrowse) }
@@ -232,8 +231,9 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                             }
                         } else {
                             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(listOf("All", "Music", "Podcasts", "Playlists", "Albums", "Artists", "YouTube")) { filter -> SChip(filter, searchFilter == filter) { searchFilter = filter } }
+                                items(SEARCH_FILTERS) { filter -> SChip(filter, searchFilter == filter) { searchFilter = filter } }
                             }
+                            val typing = search.query.trim().length < 2
                             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                                 if (searchFilter == "YouTube") {
                                     item { Text("YouTube", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp)) }
@@ -241,18 +241,22 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     items(search.youtube, key = { "youtube-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.youtube) }, onMore = { actions = song }) }
                                     if (search.youtubeLoading) item { DiscoverySkeleton() }
                                     search.youtubeError?.let { message -> item { ErrorRow(message, vm::searchYoutube) } }
-                                    if (!search.youtubeLoading && search.youtubeError == null && search.youtube.isEmpty()) item { Text("No YouTube results yet. Try a song title and artist.", color = Muted, modifier = Modifier.padding(16.dp)) }
-                                }
-                                // Sections follow the query: a show name puts Podcasts first, a mood or era puts Playlists first.
+                                    if (!typing && !search.youtubeLoading && search.youtubeError == null && search.youtube.isEmpty()) item { Text("No YouTube results yet. Try a song title and artist.", color = Muted, modifier = Modifier.padding(16.dp)) }
+                                } else if (typing) {
+                                    item { Text("Keep typing to search songs, artists, podcasts and playlists.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                } else if (!search.ready) {
+                                    // One skeleton until every source has answered, so placeholder sections never flash by.
+                                    item(key = "search-skeleton") { SearchSkeleton() }
+                                } else {
+                                // Sections follow the query: an artist's name puts Artists first, a show name puts Podcasts first, a mood or era puts Playlists first.
                                 val order = SearchRanking.order(search.query, search.tracks, search.shows, search.rich.playlists, search.rich.artists, search.rich.albums, search.rich.top)
                                 order.forEach { section ->
                                     when (section) {
                                 SearchRanking.Section.Songs -> {
-                                if (searchFilter in listOf("All", "Music")) {
+                                if (searchFilter in listOf("All", "Songs")) {
                                     if (search.tracks.isNotEmpty()) item { SHeading("Songs") }
                                     val songs = if (searchFilter == "All") CleanVersions.preview(search.tracks, 6) else search.tracks
                                     items(songs, key = { "search-${it.isrc}" }) { song -> STrack(song, currentId == song.isrc, song.isrc in favoriteIds, onPlay = { keyboard?.hide(); vm.play(song, search.tracks) }, onMore = { actions = song }) }
-                                    if (search.musicLoading) item { DiscoverySkeleton() }
                                     search.notice?.let { item { Text(it, style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(16.dp)) } }
                                 }
                                 }
@@ -262,7 +266,6 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                     val shows = if (searchFilter == "All") search.shows.take(3) else search.shows
                                     items(shows, key = { "podcast-${it.feedUrl}" }) { show -> SLibraryRow(show.title, "Podcast · ${show.author}", show.artwork) { keyboard?.hide(); vm.openShow(show) } }
                                     if (search.rich.podcasts.isNotEmpty()) item { SCardRail("From Spotify", search.rich.podcasts.take(if (searchFilter == "All") 4 else 25), vm::openCard) }
-                                    if (search.podcastLoading) item { DiscoverySkeleton() }
                                     search.podcastError?.let { item { ErrorRow(it) { vm.search(search.query) } } }
                                 }
                                 }
@@ -270,14 +273,24 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                                 if (searchFilter in listOf("All", "Playlists")) item { SCardRail("Playlists", search.rich.playlists, vm::openCard) }
                                 }
                                 SearchRanking.Section.Albums -> {
-                                if (searchFilter in listOf("All", "Albums")) item { SCardRail("Albums", search.rich.albums, vm::openCard) }
+                                if (searchFilter == "All") item { SCardRail("Albums", search.rich.albums, vm::openCard) }
                                 }
                                 SearchRanking.Section.Artists -> {
                                 if (searchFilter in listOf("All", "Artists")) item { SCardRail("Artists", search.rich.artists, vm::openCard) }
                                 }
                                     }
                                 }
-                                if (searchFilter != "YouTube" && !search.musicLoading && !search.podcastLoading && search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty()) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                val empty = when (searchFilter) {
+                                    "Artists" -> search.rich.artists.isEmpty()
+                                    "Songs" -> search.tracks.isEmpty()
+                                    "Podcasts" -> search.shows.isEmpty() && search.rich.podcasts.isEmpty()
+                                    "Playlists" -> search.rich.playlists.isEmpty()
+                                    else -> search.tracks.isEmpty() && search.shows.isEmpty() && search.rich.albums.isEmpty() && search.rich.playlists.isEmpty() && search.rich.artists.isEmpty()
+                                }
+                                val stillLoading = when (searchFilter) { "Songs" -> search.musicLoading; "Podcasts" -> search.podcastLoading; else -> false }
+                                if (empty && stillLoading) item { SearchSkeleton() }
+                                else if (empty) item { Text("No results. Try another song, artist or show.", color = Muted, modifier = Modifier.padding(24.dp)) }
+                                }
                             }
                         }
                     }
@@ -364,10 +377,8 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
         } }
         cleanChoices?.let { choice -> ModalBottomSheet(onDismissRequest = vm::dismissCleanChoices, containerColor = Color(0xFF222222)) {
             LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
-                item { SHeading("No verified clean version") }
-                item { Text((if (choice.listened > 0) "Cadence listened to ${choice.listened} ${if (choice.listened == 1) "upload" else "uploads"} of ${choice.song.title}${if (choice.swore > 0) " and heard swearing in ${choice.swore}" else ""}, so none was added. " else "Cadence couldn't find a clean version of ${choice.song.title} on its own. ") +
-                    "Pick an upload below and Cadence will listen to it for swearing before adding it. Tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
-                choice.checking?.let { title -> item { cleanProgress?.let { CleanProgressBar(it) } ?: Text("Listening to $title for swearing…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) } }
+                item { SHeading("Pick a clean version") }
+                item { Text("YouTube uploads of ${choice.song.title}. Tap one to add it next to the explicit version, or tap play to hear it first.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) }
                 if (choice.loading) item { DiscoverySkeleton() }
                 else if (choice.videos.isEmpty()) item { Text("No YouTube uploads found. Try the YouTube filter in Search.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 items(choice.videos, key = { "clean-${it.videoId}" }) { video ->
@@ -375,7 +386,7 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
                         SArt("https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg", Modifier.width(96.dp).height(54.dp))
                         Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(video.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(listOfNotNull(video.channelName.takeIf { it.isNotBlank() }, video.durationMs.takeIf { it > 0 }?.let(::timeLabel), "Clean".takeIf { CleanMatch.cleanLabel.containsMatchIn(video.title) }, when (choice.notes[video.videoId]) { CleanVerdict.UNVERIFIED -> "Couldn't confirm it's clean"; CleanVerdict.NO_VOCALS -> "Sounds instrumental"; else -> null }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(listOfNotNull(video.channelName.takeIf { it.isNotBlank() }, video.durationMs.takeIf { it > 0 }?.let(::timeLabel), "Clean".takeIf { CleanMatch.cleanLabel.containsMatchIn(video.title) }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         SIcon(Icons.Filled.PlayArrow, "Preview ${video.title}", onClick = {
                             val preview = Track("youtube:${video.videoId}", title = video.title, artist = video.channelName, durationMs = video.durationMs, albumArtUrl = "https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", source = TrackSource.YOUTUBE, youtubeVideoId = video.videoId)
@@ -395,6 +406,9 @@ fun SpotMusicApp(sharedLink: StateFlow<String?>, consumeLink: () -> Unit, vm: Sp
         }
     }
 }
+
+/** Search filters, in the order they appear. */
+private val SEARCH_FILTERS = listOf("All", "Artists", "Songs", "Podcasts", "Playlists", "YouTube")
 
 @Composable
 private fun PageTitle(title: String, create: () -> Unit, trailing: @Composable RowScope.() -> Unit = {}) {
@@ -467,18 +481,4 @@ internal fun ErrorRow(message: String, retry: () -> Unit) {
 }
 @Composable internal fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, action: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 20.dp), style = MaterialTheme.typography.bodyLarge) }
-}
-
-/** Progress while Cadence finds a clean version and listens to it for swearing. */
-@Composable
-private fun CleanProgressBar(progress: CleanProgress) {
-    val shown by androidx.compose.animation.core.animateFloatAsState(progress.fraction.coerceIn(0f, 1f), label = "clean progress")
-    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF2A2A2A)).padding(horizontal = 12.dp, vertical = 10.dp).semantics(mergeDescendants = true) {}) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Making a clean version of ${progress.title}", style = MaterialTheme.typography.bodyMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text("${(shown * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = Muted)
-        }
-        Text(progress.step, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
-        LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)), color = Green, trackColor = Color.White.copy(alpha = .15f))
-    }
 }

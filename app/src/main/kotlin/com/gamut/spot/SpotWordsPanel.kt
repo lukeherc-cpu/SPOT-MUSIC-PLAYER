@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.*
 import com.gamut.feature.playerui.LyricsState
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, background: Color, expanded: Boolean, onExpand: () -> Unit, onCover: () -> Unit, onSeek: (Long) -> Unit, modifier: Modifier = Modifier, caption: String? = null) {
@@ -26,8 +27,16 @@ internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, b
     val active = remember(loaded, position / 100) {
         if (loaded?.isSynced == true) loaded.lines.indexOfLast { it.timestampMs <= position }.coerceAtLeast(0) else -1
     }
-    LaunchedEffect(active, expanded) {
-        if (active >= 0 && !list.isScrollInProgress) list.animateScrollToItem((active - if (expanded) 2 else 1).coerceAtLeast(0))
+    // The text follows the song until the listener scrolls it themselves; then it stays put and a pill
+    // at the bottom brings it back to the line being sung.
+    var following by remember(loaded) { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val offset = if (expanded) 2 else 1
+    LaunchedEffect(list) {
+        list.interactionSource.interactions.collect { if (it is androidx.compose.foundation.interaction.DragInteraction.Start) following = false }
+    }
+    LaunchedEffect(active, expanded, following) {
+        if (following && active >= 0 && !list.isScrollInProgress) list.animateScrollToItem((active - offset).coerceAtLeast(0))
     }
     // In the square, a tap anywhere turns it back to the cover. Full screen, a tap on a timed line plays from there.
     Column(modifier.fillMaxSize().clip(RoundedCornerShape(if (expanded) 0.dp else 7.dp)).background(background)
@@ -38,7 +47,8 @@ internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, b
         }
         if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .7f), modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp))
         when (words) {
-            is LyricsState.Loaded -> LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = if (expanded) 24.dp else 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(if (expanded) 18.dp else 12.dp)) {
+            is LyricsState.Loaded -> Box(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = if (expanded) 24.dp else 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(if (expanded) 18.dp else 12.dp)) {
                 if (!words.isSynced) item { Text("Transcript · timing unavailable", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .65f)) }
                 itemsIndexed(words.lines) { index, line ->
                     Text(line.text.ifBlank { "♪" }, fontSize = if (expanded) 30.sp else 22.sp, lineHeight = if (expanded) 41.sp else 31.sp, fontWeight = FontWeight.Bold,
@@ -48,6 +58,15 @@ internal fun SpotWordsPanel(title: String, words: LyricsState, position: Long, b
                             .padding(vertical = 3.dp))
                 }
                 item { Spacer(Modifier.height(if (expanded) 140.dp else 50.dp)) }
+            }
+            if (!following && words.isSynced && active >= 0) {
+                Row(Modifier.align(Alignment.BottomCenter).padding(bottom = if (expanded) 28.dp else 10.dp).clip(RoundedCornerShape(50)).background(Color.White)
+                    .clickable(onClickLabel = "Return to the current line") { following = true; scope.launch { list.animateScrollToItem((active - offset).coerceAtLeast(0)) } }
+                    .padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.VerticalAlignCenter, null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                    Text("Back to song", color = Color.Black, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
+                }
+            }
             }
             else -> Box(Modifier.weight(1f).fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
