@@ -98,6 +98,7 @@ internal fun PodcastEpisodeCards(episodes: List<HomeEpisode>, vm: SpotViewModel)
 
 // Music videos play muted inside the card, in the app, instead of opening another site.
 // The card most in view starts on its own, muted. A tap stops it, and a tap on another card plays that one.
+// Scrolling to another card hands autoplay to it, even after one was stopped or picked by hand.
 @Composable
 internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Music videos for you", onUnmute: () -> Unit = {}) {
     if (videos.isEmpty()) return
@@ -108,26 +109,34 @@ internal fun MusicVideoRail(videos: List<YoutubeCandidate>, title: String = "Mus
     val inView by remember { derivedStateOf {
         rail.layoutInfo.visibleItemsInfo.firstOrNull { it.offset >= -it.size / 2 }?.index ?: rail.firstVisibleItemIndex
     } }
-    val playing = chosen ?: videos.getOrNull(inView)?.videoId?.takeIf { it !in stopped }
+    // Videos YouTube won't play inside another app (or that never start) are skipped, not shown as playing.
+    var failed by remember { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(rail) {
+        snapshotFlow { inView }.collect { index ->
+            if (chosen != null && videos.getOrNull(index)?.videoId != chosen) { chosen = null; unmuted = null }
+        }
+    }
+    val playing = chosen ?: videos.getOrNull(inView)?.videoId?.takeIf { it !in stopped && it !in failed }
     SHeading(title)
     LazyRow(state = rail, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(videos, key = { it.videoId }) { video ->
             val on = playing == video.videoId
             Column(Modifier.width(272.dp).clip(RoundedCornerShape(8.dp)).background(Card).clickable(onClickLabel = if (on) "Stop video" else "Play video muted") {
-                if (on) { stopped = stopped + video.videoId; chosen = null } else { stopped = stopped - video.videoId; chosen = video.videoId }
+                if (on) { stopped = stopped + video.videoId; chosen = null } else { stopped = stopped - video.videoId; failed = failed - video.videoId; chosen = video.videoId }
             }) {
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
                     // The thumbnail stays underneath, so the card never shows an empty black box while the video loads.
                     SArt("https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg", Modifier.fillMaxSize())
                     if (on) MutedVideo(video.videoId, Modifier.fillMaxSize(), muted = unmuted != video.videoId,
                         onToggleMute = { if (unmuted == video.videoId) unmuted = null else { unmuted = video.videoId; chosen = video.videoId; onUnmute() } },
-                        onTap = { stopped = stopped + video.videoId; chosen = null; unmuted = null })
+                        onTap = { stopped = stopped + video.videoId; chosen = null; unmuted = null },
+                        onFailed = { failed = failed + video.videoId; if (chosen == video.videoId) chosen = null })
                     else {
                         Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(40.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, null, tint = Color.Black) }
                     }
                 }
                 Text(video.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp))
-                Text((if (on && unmuted == video.videoId) "Playing · tap to stop · " else if (on) "Playing muted · tap to stop · " else "Plays muted in Cadence · ") + video.channelName, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
+                Text((if (on && unmuted == video.videoId) "Playing · tap to stop · " else if (on) "Playing muted · tap to stop · " else if (video.videoId in failed) "Can't play here · tap to try again · " else "Plays muted in Cadence · ") + video.channelName, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
             }
         }
     }
@@ -177,7 +186,7 @@ internal fun CategoryRail(title: String, categories: List<BrowseCategory>, artwo
 
 @android.annotation.SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 @Composable
-private fun MutedVideo(videoId: String, modifier: Modifier, muted: Boolean, onToggleMute: () -> Unit, onTap: () -> Unit) {
+private fun MutedVideo(videoId: String, modifier: Modifier, muted: Boolean, onToggleMute: () -> Unit, onTap: () -> Unit, onFailed: () -> Unit) {
     val id = videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(11)
     val origin = "https://www.youtube-nocookie.com"
     // The video stays hidden behind its thumbnail until it is actually playing, so YouTube's poster,
@@ -186,6 +195,9 @@ private fun MutedVideo(videoId: String, modifier: Modifier, muted: Boolean, onTo
     // and logo sit in the cropped-off strips above and below it.
     var playing by remember(id) { mutableStateOf(false) }
     var web by remember(id) { mutableStateOf<android.webkit.WebView?>(null) }
+    val fail by rememberUpdatedState(onFailed)
+    // A video that hasn't started after a while is treated as unplayable, so the card doesn't claim it's playing.
+    LaunchedEffect(id, playing) { if (!playing) { kotlinx.coroutines.delay(12_000); fail() } }
     // The video starts muted; the speaker button turns its sound on and off.
     LaunchedEffect(web, muted, playing) {
         web?.evaluateJavascript(if (muted) "window.pl&&pl.mute()" else "window.pl&&(pl.unMute(),pl.setVolume(100))", null)
@@ -196,7 +208,7 @@ html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;positi
 #p,iframe{position:absolute;left:0;top:-90px;width:100%;height:calc(100% + 180px);border:0;pointer-events:none}
 </style></head><body><div id="p"></div><script>
 function onYouTubeIframeAPIReady(){window.pl=new YT.Player('p',{host:'$origin',videoId:'$id',playerVars:{autoplay:1,mute:1,playsinline:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,cc_load_policy:0,rel:0,modestbranding:1,loop:1,playlist:'$id'},
-events:{onReady:function(e){e.target.mute();e.target.playVideo()},onStateChange:function(e){if(e.data==1)Cadence.started();else if(e.data==0||e.data==2)e.target.playVideo()}}})}
+events:{onReady:function(e){e.target.mute();e.target.playVideo()},onError:function(){Cadence.failed()},onStateChange:function(e){if(e.data==1)Cadence.started();else if(e.data==0||e.data==2)e.target.playVideo()}}})}
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
     Box(modifier) {
         androidx.compose.ui.viewinterop.AndroidView(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = shown }, factory = { context ->
@@ -209,6 +221,7 @@ events:{onReady:function(e){e.target.mute();e.target.playVideo()},onStateChange:
                 settings.mediaPlaybackRequiresUserGesture = false
                 addJavascriptInterface(object {
                     @android.webkit.JavascriptInterface fun started() { post { playing = true } }
+                    @android.webkit.JavascriptInterface fun failed() { post { fail() } }
                 }, "Cadence")
                 // Stay in the app: links out of the player are ignored.
                 webViewClient = object : android.webkit.WebViewClient() {
