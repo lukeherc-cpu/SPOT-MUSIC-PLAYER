@@ -666,8 +666,14 @@ class SpotViewModel @Inject constructor(
                     .awaitAll().flatten().filter { !it.explicit && CleanMatch.tokens(it.title).containsAll(baseWords) }
                     .map { YoutubeCandidate(it.videoId, it.title, it.artist, channelIsTopicChannel = false, durationMs = it.durationMs, viewCount = 0, category = "songs", isMusicCatalog = true) }
             }
-            val uploads = listOf("$artist $base clean", "$artist $base radio edit", "$artist $base").map { q -> async { try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } } }
-            val found = (music.await() + uploads.awaitAll().flatten()).filter { isValidYoutubeVideoId(it.videoId) }.distinctBy { it.videoId }
+            // YouTube searches share one yt-dlp instance and fail silently when run together, so they take turns,
+            // widening until enough uploads turn up.
+            val uploads = mutableListOf<YoutubeCandidate>()
+            for (q in listOf("$artist $base clean", "$artist $base radio edit", "$artist $base", "$base clean")) {
+                uploads += try { youtube.searchBroad(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+                if (uploads.distinctBy { it.videoId }.size >= 12) break
+            }
+            val found = (music.await() + uploads).filter { isValidYoutubeVideoId(it.videoId) }.distinctBy { it.videoId }
                 .sortedWith(compareByDescending<YoutubeCandidate> { CleanMatch.cleanLabel.containsMatchIn(it.title) }.thenByDescending { it.isMusicCatalog }.thenByDescending { CleanMatch.tokens(it.title).containsAll(baseWords) }.thenByDescending { it.viewCount })
                 .take(20)
             _cleanChoices.update { if (it?.song?.isrc == song.isrc) it.copy(videos = found, loading = false) else it }
